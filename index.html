@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>JobTrack CRM</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/styles.css" />
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">JT</div>
+        <div>
+          <div class="brand-name">JobTrack</div>
+          <div class="brand-sub">Personal CRM</div>
+        </div>
+      </div>
+      <nav class="nav">
+        <a href="#dashboard" class="nav-item" data-view="dashboard"><span class="ico">▦</span>Dashboard</a>
+        <a href="#pipeline" class="nav-item" data-view="pipeline"><span class="ico">☰</span>Pipeline</a>
+        <a href="#jobs" class="nav-item" data-view="jobs"><span class="ico">≡</span>All jobs</a>
+        <a href="#followups" class="nav-item" data-view="followups"><span class="ico">⏰</span>Follow-ups<span class="badge" id="followupBadge"></span></a>
+        <a href="#contacts" class="nav-item" data-view="contacts"><span class="ico">👤</span>Contacts</a>
+        <a href="#settings" class="nav-item" data-view="settings"><span class="ico">⚙</span>Settings</a>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="storage-pill" id="storagePill">Saved in this browser</div>
+      </div>
+    </aside>
+
+    <!-- Main -->
+    <div class="main">
+      <header class="topbar">
+        <button class="icon-btn mobile-only" id="menuBtn" aria-label="Open menu">☰</button>
+        <div>
+          <h1 id="viewTitle">Dashboard</h1>
+          <p class="subtitle" id="viewSubtitle">Your job search at a glance</p>
+        </div>
+        <div class="topbar-actions">
+          <div class="search">
+            <input type="search" id="globalSearch" placeholder="Search jobs, companies, countries…" />
+          </div>
+          <button class="icon-btn" id="themeBtn" title="Toggle theme" aria-label="Toggle theme"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+          <button class="btn primary" id="addJobBtn">+ Add job</button>
+        </div>
+      </header>
+
+      <main class="content">
+        <!-- Dashboard -->
+        <section class="view" id="view-dashboard">
+          <div class="kpis" id="kpis"></div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head"><h3>Pipeline by stage</h3></div>
+              <div id="stageChart" class="bar-list"></div>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>Applications by country</h3></div>
+              <div id="countryChart" class="bar-list"></div>
+            </div>
+          </div>
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head"><h3>Applications over the last 8 weeks</h3></div>
+              <div id="weeklyChart" class="weekly"></div>
+            </div>
+            <div class="card">
+              <div class="card-head">
+                <h3>Upcoming follow-ups</h3>
+                <a href="#followups" class="link">View all</a>
+              </div>
+              <ul id="upcomingList" class="list"></ul>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head">
+              <h3>Top matches (by fit score)</h3>
+              <a href="#jobs" class="link">All jobs</a>
+            </div>
+            <div class="table-wrap"><table class="table" id="topTable"></table></div>
+          </div>
+        </section>
+
+        <!-- Pipeline / Kanban -->
+        <section class="view" id="view-pipeline">
+          <div class="toolbar">
+            <select id="pipeCountry" class="select"><option value="">All countries</option></select>
+            <span class="hint">Drag cards between columns to update the stage</span>
+          </div>
+          <div class="kanban" id="kanban"></div>
+        </section>
+
+        <!-- Jobs table -->
+        <section class="view" id="view-jobs">
+          <div class="toolbar">
+            <select id="fStatus" class="select"><option value="">All stages</option></select>
+            <select id="fCountry" class="select"><option value="">All countries</option></select>
+            <select id="fPriority" class="select">
+              <option value="">All priorities</option>
+              <option>High</option><option>Medium</option><option>Low</option>
+            </select>
+            <label class="check"><input type="checkbox" id="fVisa" /> Visa sponsorship only</label>
+            <span class="spacer"></span>
+            <button class="btn" id="exportCsvBtn">Export CSV</button>
+          </div>
+          <div class="card flush">
+            <div class="table-wrap"><table class="table" id="jobsTable"></table></div>
+          </div>
+        </section>
+
+        <!-- Follow-ups -->
+        <section class="view" id="view-followups">
+          <div class="grid-3" id="followupCols"></div>
+        </section>
+
+        <!-- Contacts -->
+        <section class="view" id="view-contacts">
+          <div class="toolbar">
+            <span class="hint">Recruiters, hiring managers and referrals</span>
+            <span class="spacer"></span>
+            <button class="btn primary" id="addContactBtn">+ Add contact</button>
+          </div>
+          <div class="contacts" id="contactsGrid"></div>
+        </section>
+
+        <!-- Settings -->
+        <section class="view" id="view-settings">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-head"><h3>Target countries</h3></div>
+              <p class="muted">These appear as quick choices when you add a job.</p>
+              <div class="chips" id="countryChips"></div>
+              <form class="inline-form" id="countryForm">
+                <input class="input" id="countryInput" placeholder="Add a country" />
+                <button class="btn">Add</button>
+              </form>
+            </div>
+            <div class="card">
+              <div class="card-head"><h3>Data</h3></div>
+              <p class="muted">Data is stored in this browser for now. Back it up as JSON, or move it to another device.</p>
+              <div class="btn-row">
+                <button class="btn" id="exportJsonBtn">Export JSON backup</button>
+                <label class="btn">Import JSON<input type="file" id="importJson" accept="application/json" hidden /></label>
+                <button class="btn" id="seedBtn">Load sample data</button>
+                <button class="btn danger" id="clearBtn">Delete all data</button>
+              </div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Backend</h3></div>
+            <p class="muted">Storage mode: <strong id="backendMode">Local (browser)</strong>. When the Firebase backend is ready, fill in <code>js/firebase-config.js</code> and switch the data adapter in <code>js/store.js</code>. No other file needs to change.</p>
+          </div>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <!-- Job modal -->
+  <div class="modal" id="jobModal" aria-hidden="true">
+    <div class="modal-box">
+      <div class="modal-head">
+        <h2 id="jobModalTitle">Add job</h2>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+      <form id="jobForm" class="form">
+        <input type="hidden" name="id" />
+        <div class="form-grid">
+          <label>Job title*<input class="input" name="title" required /></label>
+          <label>Company*<input class="input" name="company" required /></label>
+          <label>Country*<input class="input" name="country" list="countryList" required /></label>
+          <label>City<input class="input" name="city" /></label>
+          <label>Stage
+            <select class="select" name="status" id="statusSelect"></select>
+          </label>
+          <label>Priority
+            <select class="select" name="priority"><option>High</option><option selected>Medium</option><option>Low</option></select>
+          </label>
+          <label>Work mode
+            <select class="select" name="workMode"><option>On-site</option><option selected>Hybrid</option><option>Remote</option></select>
+          </label>
+          <label>Source
+            <select class="select" name="source"><option>LinkedIn</option><option>Company site</option><option>Referral</option><option>Recruiter</option><option>Job board</option><option>Other</option></select>
+          </label>
+          <label>Fit score (1 to 10)<input class="input" type="number" min="1" max="10" name="fitScore" /></label>
+          <label>Salary / range<input class="input" name="salary" placeholder="e.g. €55k to €65k" /></label>
+          <label>Date applied<input class="input" type="date" name="appliedDate" /></label>
+          <label>Follow-up date<input class="input" type="date" name="followUpDate" /></label>
+          <label class="span-2">Job link<input class="input" type="url" name="link" placeholder="https://www.linkedin.com/jobs/view/…" /></label>
+          <label>Contact person<input class="input" name="contact" list="contactList" /></label>
+          <label>Language requirement<input class="input" name="language" placeholder="e.g. English only" /></label>
+          <label class="check span-2"><input type="checkbox" name="visa" /> Visa sponsorship or relocation support offered</label>
+          <label class="span-2">Notes<textarea class="input" name="notes" rows="3"></textarea></label>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn danger ghost" id="deleteJobBtn">Delete</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn" data-close>Cancel</button>
+          <button type="submit" class="btn primary">Save job</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Contact modal -->
+  <div class="modal" id="contactModal" aria-hidden="true">
+    <div class="modal-box small">
+      <div class="modal-head">
+        <h2 id="contactModalTitle">Add contact</h2>
+        <button class="icon-btn" data-close aria-label="Close">✕</button>
+      </div>
+      <form id="contactForm" class="form">
+        <input type="hidden" name="id" />
+        <div class="form-grid">
+          <label class="span-2">Name*<input class="input" name="name" required /></label>
+          <label>Role<input class="input" name="role" placeholder="Recruiter, Hiring manager…" /></label>
+          <label>Company<input class="input" name="company" /></label>
+          <label>Email<input class="input" type="email" name="email" /></label>
+          <label>LinkedIn URL<input class="input" type="url" name="linkedin" /></label>
+          <label class="span-2">Notes<textarea class="input" name="notes" rows="3"></textarea></label>
+        </div>
+        <div class="modal-foot">
+          <button type="button" class="btn danger ghost" id="deleteContactBtn">Delete</button>
+          <span class="spacer"></span>
+          <button type="button" class="btn" data-close>Cancel</button>
+          <button type="submit" class="btn primary">Save contact</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <datalist id="countryList"></datalist>
+  <datalist id="contactList"></datalist>
+  <div class="toast" id="toast"></div>
+
+  <script src="js/firebase-config.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
