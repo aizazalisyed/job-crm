@@ -371,3 +371,5 @@ textarea.letter { font-size: 14px; line-height: 1.55; }
 [data-theme="dark"] .tag-bad { background: #3a1d1d; }
 [data-theme="dark"] .tag-warn { background: #3a2c12; color: #f0b45a; }
 .src { font-weight: 600; color: var(--primary); }
+.chip-check.world { border-style: dashed; font-weight: 600; }
+.chip-check.world.on { border-style: solid; }

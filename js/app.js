@@ -417,7 +417,8 @@
 
     $("#countryForm").addEventListener("submit", async e => {
       e.preventDefault();
-      const v = $("#countryInput").value.trim();
+      let v = $("#countryInput").value.trim();
+      if (/^(the )?(whole )?(world|word|worldwide|global|anywhere)$/i.test(v)) v = "Worldwide";
       if (v && !state.settings.countries.includes(v)) {
         state.settings.countries.push(v);
         await Store.saveSettings(state.settings);

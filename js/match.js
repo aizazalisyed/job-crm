@@ -29,7 +29,12 @@ window.JobMatch = (() => {
   // Everything below lives in memory only and is loaded from Firebase after sign-in.
   let keys = { ...EMPTY_KEYS };
   let results = [];
-  const DEFAULT_PREFS = { countries: null, datePosted: "r604800", perCountry: 25, minScore: 0, sources: ["linkedin", "indeed", "glassdoor"] };
+  const DEFAULT_PREFS = { countries: null, datePosted: "r604800", perCountry: 25, minScore: 0, sources: ["linkedin", "indeed", "glassdoor"], workMode: "any", showMode: "any" };
+  const WORLD = "Worldwide";
+  const TOP_N = 100;               // keep only the 100 most relevant jobs
+  const WORLD_LIMIT = 200;         // LinkedIn jobs fetched for a worldwide search before ranking
+  const MODES = { any: "Any", remote: "Remote only", hybrid: "Hybrid", onsite: "On-site" };
+  const MODE_LABEL = { remote: "Remote", hybrid: "Hybrid", onsite: "On-site" };
   let prefs = { ...DEFAULT_PREFS };
   let busy = false;
   let status = "";
@@ -47,7 +52,8 @@ window.JobMatch = (() => {
   }
   const profile = () => state.settings.profile || null;
   const targetCountries = () => state.settings.countries || [];
-  const selectedCountries = () => (prefs.countries || targetCountries()).filter(c => targetCountries().includes(c));
+  const selectedCountries = () => (prefs.countries || targetCountries()).filter(c => c === WORLD || targetCountries().includes(c));
+  const countryFromLocation = loc => { const parts = String(loc || "").split(",").map(x => x.trim()).filter(Boolean); return parts[parts.length - 1] || WORLD; };
   const safeUrl = u => /^https:\/\//i.test(u || "") ? u : "";
 
   // ---------- Claude API ----------
@@ -128,7 +134,8 @@ window.JobMatch = (() => {
               reason: { type: "string", description: "Why, in at most 20 words" },
               visa: { type: "boolean", description: "True only if the posting mentions visa sponsorship, relocation support or work permit help" },
               language: { type: "string", description: "Required languages other than English, or empty string" },
-              deadline: { type: "string", description: "Application deadline as YYYY-MM-DD if the posting clearly states one, otherwise empty string. Never guess." }
+              deadline: { type: "string", description: "Application deadline as YYYY-MM-DD if the posting clearly states one, otherwise empty string. Never guess." },
+              workMode: { type: "string", enum: ["Remote", "Hybrid", "On-site", "Unknown"], description: "Work arrangement stated in the posting. Remote = fully remote. Unknown if not stated." }
             },
             required: ["i", "score", "reason"]
           }
@@ -208,7 +215,9 @@ window.JobMatch = (() => {
   }
 
   async function searchLinkedIn(country, keywords) {
-    const items = await apifyRun(LINKEDIN_ACTOR, { keywords: booleanQuery(keywords), location: country, datePosted: prefs.datePosted, limit: Number(prefs.perCountry) })
+    const base = country === WORLD ? WORLD_LIMIT : Number(prefs.perCountry);
+    const limit = prefs.workMode && prefs.workMode !== "any" ? Math.min(base * 2, 300) : base;   // fetch extra, Claude filters by work mode
+    const items = await apifyRun(LINKEDIN_ACTOR, { keywords: booleanQuery(keywords), location: country, datePosted: prefs.datePosted, limit })
       .catch(e => { throw new Error(`LinkedIn (${country}): ${e.message}`); });
     return items.map(it => ({
       id: safeId("li", it.id || it.url),
@@ -216,13 +225,14 @@ window.JobMatch = (() => {
       title: it.title || "",
       company: it.companyName || "",
       location: it.location || country,
-      country,
+      country: country === WORLD ? countryFromLocation(it.location) : country,
       url: it.url || "",
       applyUrl: it.applyUrl || it.url || "",
       postedTimeAgo: it.postedTimeAgo || "",
       postedDate: it.postedDate || "",
       salary: it.salary || "",
-      workType: it.workType || "",
+      industry: it.workType || it.sector || "",   // this actor's "workType" field holds the industry
+      workMode: "",                              // set by Claude from the description
       experienceLevel: it.experienceLevel || "",
       applicants: it.applicationsCount || "",
       description: cleanText(it.description).slice(0, 6000)
@@ -234,6 +244,7 @@ window.JobMatch = (() => {
     const items = await apifyRun(BOARDS_ACTOR, {
       searchTerms: keywords.slice(0, 2), location: country, sites, maxResults: per,
       hoursOld: HOURS[prefs.datePosted], countryIndeed: country, descriptionFormat: "markdown",
+      ...(prefs.workMode === "remote" ? { isRemote: true } : {}),
       proxyConfiguration: { useApifyProxy: true }
     }).catch(e => { throw new Error(`${sites.map(x => SOURCES[x].label).join("/")} (${country}): ${e.message}`); });
     return items.filter(it => it.title && (it.job_url || it.job_url_direct)).map(it => {
@@ -245,7 +256,7 @@ window.JobMatch = (() => {
         title: it.title, company: it.company || "", location: it.location || country, country,
         url: it.job_url || it.job_url_direct, applyUrl: it.job_url_direct || it.job_url,
         postedTimeAgo: "", postedDate: it.date_posted || "", salary: sal,
-        workType: it.is_remote ? "Remote" : "", experienceLevel: "", applicants: "",
+        industry: it.company_industry || "", workMode: it.is_remote ? "Remote" : "", experienceLevel: "", applicants: "",
         description: cleanText(it.description).slice(0, 6000)
       };
     });
@@ -259,15 +270,15 @@ window.JobMatch = (() => {
     let done = 0;
     const runChunk = async chunk => {
       const desc = d => d.length > 1300 ? d.slice(0, 1000) + "\n…\n" + d.slice(-300) : d;
-      const list = chunk.map((j, i) => `[${i}] ${j.title} | ${j.company} | ${j.location} | ${j.experienceLevel} | ${j.workType}\n${desc(j.description)}`).join("\n\n");
+      const list = chunk.map((j, i) => `[${i}] ${j.title} | ${j.company} | ${j.location} | ${j.experienceLevel} | ${j.industry || ""}\n${desc(j.description)}`).join("\n\n");
       const out = await claude({
         max_tokens: 3000,
         tools: [SCORE_TOOL],
-        messages: [{ role: "user", content: `Candidate profile:\n${JSON.stringify(prof)}\n\nScore how well each job below fits this candidate (skills, seniority, domain). Today is ${new Date().toISOString().slice(0, 10)}. Penalise jobs that require a local language the candidate does not speak, or far more or less seniority. You must call the save_scores tool exactly once and include every index; do not reply with plain text.\n\nJobs:\n${list}` }]
+        messages: [{ role: "user", content: `Candidate profile:\n${JSON.stringify(prof)}\n\nScore how well each job below fits this candidate (skills, seniority, domain). Today is ${new Date().toISOString().slice(0, 10)}. Also classify each job's work mode (Remote, Hybrid, On-site or Unknown) from the posting text and location. Penalise jobs that require a local language the candidate does not speak, or far more or less seniority. You must call the save_scores tool exactly once and include every index; do not reply with plain text.\n\nJobs:\n${list}` }]
       });
       (out.scores || []).forEach(s => {
         const j = chunk[s.i];
-        if (j) Object.assign(j, { score: s.score, reason: s.reason, visa: !!s.visa, language: s.language || "", deadline: /^\d{4}-\d{2}-\d{2}$/.test(s.deadline || "") ? s.deadline : "" });
+        if (j) Object.assign(j, { score: s.score, reason: s.reason, visa: !!s.visa, language: s.language || "", deadline: /^\d{4}-\d{2}-\d{2}$/.test(s.deadline || "") ? s.deadline : "", workMode: j.workMode || (s.workMode && s.workMode !== "Unknown" ? s.workMode : "") });
       });
       done += chunk.length;
       setStatus(`Scoring with Claude… ${done}/${jobs.length}`);
@@ -289,12 +300,14 @@ window.JobMatch = (() => {
     if (!sources.length) return toast("Select at least one job site");
     const boardSites = sources.filter(x => x !== "linkedin");
     const tasks = [];
+    if (countries.includes(WORLD) && !sources.includes("linkedin")) return toast("Worldwide search uses LinkedIn. Turn on LinkedIn in Job sites.");
     countries.forEach(c => {
       if (sources.includes("linkedin")) tasks.push(() => searchLinkedIn(c, p.searchKeywords));
-      if (boardSites.length) tasks.push(() => searchBoards(c, p.searchKeywords, boardSites));
+      if (boardSites.length && c !== WORLD) tasks.push(() => searchBoards(c, p.searchKeywords, boardSites));
     });
     const names = sources.map(x => SOURCES[x].label).join(", ");
-    setBusy(true, `Searching ${names} in ${countries.length} countr${countries.length === 1 ? "y" : "ies"}… this can take 2 to 5 minutes`);
+    const where = countries.includes(WORLD) ? `worldwide${countries.length > 1 ? ` and ${countries.length - 1} more` : ""}` : `${countries.length} countr${countries.length === 1 ? "y" : "ies"}`;
+    setBusy(true, `Searching ${names} ${countries.includes(WORLD) ? "" : "in "}${where}${prefs.workMode !== "any" ? ` (${MODES[prefs.workMode].toLowerCase()})` : ""}… this can take 2 to 5 minutes`);
     try {
       const settled = await pool(tasks, 4);
       const errors = settled.filter(s => !s.ok).map(s => s.error.message);
@@ -308,9 +321,13 @@ window.JobMatch = (() => {
       }
       setStatus(`Found ${jobs.length} jobs. Scoring with Claude…`);
       await scoreJobs(jobs);
-      results = jobs.sort((a, b) => (b.score || 0) - (a.score || 0));
+      const want = MODE_LABEL[prefs.workMode];
+      const filtered = want ? jobs.filter(j => j.workMode === want) : jobs;
+      results = filtered.sort((a, b) => (b.score || 0) - (a.score || 0)).slice(0, TOP_N);
       saveResults();
-      toast(`${results.length} jobs found and scored`);
+      toast(want
+        ? `${filtered.length} of ${jobs.length} jobs are ${want.toLowerCase()}. Showing the top ${results.length}.`
+        : `${jobs.length} jobs scored. Showing the top ${results.length}.`);
       if (errors.length) toast(`${errors.length} search(es) failed: ${errors[0]}`);
     } finally { setBusy(false); }
   }
@@ -318,7 +335,7 @@ window.JobMatch = (() => {
   // ---------- add to tracker ----------
   const inTracker = r => state.jobs.some(j => (j.linkedinId && j.linkedinId === r.id) || (r.url && j.link === r.url));
   function trackerJobFromResult(r) {
-    const mode = /remote/i.test(r.workType) ? "Remote" : /hybrid/i.test(r.workType) ? "Hybrid" : "On-site";
+    const mode = ["Remote", "Hybrid", "On-site"].includes(r.workMode) ? r.workMode : "";
     const city = r.location && r.location !== r.country ? r.location.split(",")[0] : "";
     return {
       title: r.title, company: r.company, country: r.country, city,
@@ -363,7 +380,11 @@ window.JobMatch = (() => {
     const per = Number(prefs.perCountry);
     const li = src.includes("linkedin") ? per * SOURCES.linkedin.costPerJob : 0;
     const boards = src.filter(x => x !== "linkedin").length * Math.max(5, Math.round(per / 2)) * 2 * 0.006;
-    return nCountries * (li + boards) + 0.01;
+    const sel = selectedCountries();
+    const world = sel.includes(WORLD);
+    const nC = sel.filter(c => c !== WORLD).length;
+    const mult = prefs.workMode && prefs.workMode !== "any" ? 2 : 1;
+    return nC * (li * mult + boards) + (world && src.includes("linkedin") ? Math.min(WORLD_LIMIT * mult, 300) * SOURCES.linkedin.costPerJob : 0) + 0.01;
   }
   const deadlineTag = d => {
     if (!d) return "";
@@ -378,7 +399,8 @@ window.JobMatch = (() => {
     const p = profile();
     const hasA = !!keys.anthropicKey, hasP = !!keys.apifyToken;
     const sel = selectedCountries();
-    const shown = results.filter(r => (r.score || 0) >= Number(prefs.minScore || 0));
+    const showMode = MODE_LABEL[prefs.showMode];
+    const shown = results.filter(r => (r.score || 0) >= Number(prefs.minScore || 0) && (!showMode || r.workMode === showMode));
 
     view.innerHTML = `
       ${!hasA || !hasP ? `<div class="notice">
@@ -414,13 +436,14 @@ window.JobMatch = (() => {
           <form class="inline-form" id="kwForm"><input class="input" id="kwInput" placeholder="Add a job title, e.g. IT Risk Manager" /><button class="btn">Add</button></form>
 
           <div class="field-label" style="margin-top:14px">Countries <span class="hint">(edit the list in Settings)</span></div>
-          <div class="chips">${targetCountries().map(c => `<label class="chip-check ${sel.includes(c) ? "on" : ""}"><input type="checkbox" data-country="${esc(c)}" ${sel.includes(c) ? "checked" : ""} hidden />${esc(c)}</label>`).join("") || `<span class="hint">No target countries yet</span>`}</div>
+          <div class="chips"><label class="chip-check world ${sel.includes(WORLD) ? "on" : ""}" title="Search every country and keep the top ${TOP_N} matches"><input type="checkbox" data-country="${WORLD}" ${sel.includes(WORLD) ? "checked" : ""} hidden />🌍 Worldwide</label>${targetCountries().filter(c => c !== WORLD).map(c => `<label class="chip-check ${sel.includes(c) ? "on" : ""}"><input type="checkbox" data-country="${esc(c)}" ${sel.includes(c) ? "checked" : ""} hidden />${esc(c)}</label>`).join("") || `<span class="hint">No target countries yet</span>`}</div>
 
           <div class="field-label" style="margin-top:14px">Job sites</div>
           <div class="chips">${Object.entries(SOURCES).map(([k, v]) => `<label class="chip-check ${(prefs.sources || []).includes(k) ? "on" : ""}"><input type="checkbox" data-source="${k}" ${(prefs.sources || []).includes(k) ? "checked" : ""} hidden />${v.label}</label>`).join("")}</div>
 
           <div class="form-grid" style="margin-top:12px">
             <label>Date posted<select class="select" id="mDate">${Object.entries(DATE_OPTS).map(([v, l]) => `<option value="${v}" ${prefs.datePosted === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+            <label>Work mode<select class="select" id="mMode">${Object.entries(MODES).map(([v, l]) => `<option value="${v}" ${prefs.workMode === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
             <label>Jobs per country<select class="select" id="mPer">${[10, 25, 50].map(n => `<option ${Number(prefs.perCountry) === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>
           </div>
           <div class="btn-row" style="margin-top:14px">
@@ -441,6 +464,10 @@ window.JobMatch = (() => {
       <div class="card flush">
         <div class="card-head pad">
           <h3>Matches <span class="hint">${shown.length} of ${results.length}</span></h3>
+          <span class="spacer"></span>
+          <label class="hint" style="display:flex;gap:8px;align-items:center;margin-right:12px">Work mode
+            <select class="select" id="mShow" style="width:auto">${Object.entries(MODES).map(([v, l]) => `<option value="${v}" ${prefs.showMode === v ? "selected" : ""}>${v === "any" ? "All" : l}</option>`).join("")}</select>
+          </label>
           <label class="hint" style="display:flex;gap:8px;align-items:center">Minimum fit
             <select class="select" id="mMin" style="width:auto">${[0, 5, 6, 7, 8].map(n => `<option value="${n}" ${Number(prefs.minScore) === n ? "selected" : ""}>${n ? n + "+" : "All"}</option>`).join("")}</select>
           </label>
@@ -456,7 +483,8 @@ window.JobMatch = (() => {
               <div class="kcard-meta">
                 ${r.visa ? `<span class="tag visa-yes">Visa / relocation</span>` : ""}
                 ${r.language ? `<span class="tag">Needs ${esc(r.language)}</span>` : ""}
-                ${r.workType ? `<span class="tag">${esc(r.workType)}</span>` : ""}
+                <span class="tag ${r.workMode === "Remote" ? "visa-yes" : ""}">${r.workMode ? (r.workMode === "Remote" ? "🏠 Remote" : r.workMode === "Hybrid" ? "🏢 Hybrid" : "📍 On-site") : "Work mode: N/A"}</span>
+                ${r.industry ? `<span class="tag">${esc(r.industry)}</span>` : ""}
                 ${r.experienceLevel ? `<span class="tag">${esc(r.experienceLevel)}</span>` : ""}
                 ${r.salary ? `<span class="tag">${esc(r.salary)}</span>` : ""}
                 <span class="tag">Applicants: ${esc(r.applicants || r.applicationsCount || "N/A")}</span>
@@ -502,6 +530,8 @@ window.JobMatch = (() => {
       prefs.countries = [...cur]; savePrefs(); render();
     });
     const d = $("#mDate", view); if (d) d.onchange = () => { prefs.datePosted = d.value; savePrefs(); render(); };
+    const md = $("#mMode", view); if (md) md.onchange = () => { prefs.workMode = md.value; savePrefs(); render(); };
+    const sh = $("#mShow", view); if (sh) sh.onchange = () => { prefs.showMode = sh.value; savePrefs(); render(); };
     const per = $("#mPer", view); if (per) per.onchange = () => { prefs.perCountry = Number(per.value); savePrefs(); render(); };
     const min = $("#mMin", view); if (min) min.onchange = () => { prefs.minScore = Number(min.value); savePrefs(); render(); };
     const find = $("#findBtn", view); if (find) find.onclick = run(findJobs);
