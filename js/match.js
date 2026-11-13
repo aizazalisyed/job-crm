@@ -49,9 +49,14 @@ window.JobMatch = (() => {
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error("Claude API error: " + ((data.error && data.error.message) || res.status));
-    const tool = (data.content || []).find(c => c.type === "tool_use");
-    if (!tool) throw new Error("Claude did not return structured data. Try again.");
-    return tool.input;
+    const blocks = data.content || [];
+    const tool = blocks.find(c => c.type === "tool_use");
+    if (tool) return tool.input;
+    // Fallback: some models answer with JSON in a text block instead of calling the tool.
+    const text = blocks.filter(c => c.type === "text").map(c => c.text).join("\n");
+    const m = text.match(/```(?:json)?\s*([\s\S]*?)```/) || text.match(/(\{[\s\S]*\})/);
+    if (m) { try { return JSON.parse(m[1]); } catch {} }
+    throw new Error("Claude did not return structured data. Try again.");
   }
 
   const PROFILE_TOOL = {
@@ -139,8 +144,7 @@ window.JobMatch = (() => {
       const p = await claude({
         max_tokens: 2000,
         tools: [PROFILE_TOOL],
-        tool_choice: { type: "tool", name: "save_profile" },
-        messages: [{ role: "user", content: [...content, { type: "text", text: "Read this CV and extract the candidate profile with the save_profile tool. For searchKeywords, suggest job titles that match the candidate's real experience level and that employers in Europe actually use on LinkedIn." }] }]
+        messages: [{ role: "user", content: [...content, { type: "text", text: "Read this CV and extract the candidate profile. You must call the save_profile tool exactly once; do not reply with plain text. For searchKeywords, suggest job titles that match the candidate's real experience level and that employers in Europe actually use on LinkedIn." }] }]
       });
       p.fileName = file.name;
       p.parsedAt = new Date().toISOString();
@@ -200,8 +204,7 @@ window.JobMatch = (() => {
       const out = await claude({
         max_tokens: 3000,
         tools: [SCORE_TOOL],
-        tool_choice: { type: "tool", name: "save_scores" },
-        messages: [{ role: "user", content: `Candidate profile:\n${JSON.stringify(prof)}\n\nScore how well each job below fits this candidate (skills, seniority, domain). Penalise jobs that require a local language the candidate does not speak, or far more or less seniority. Use the save_scores tool and include every index.\n\nJobs:\n${list}` }]
+        messages: [{ role: "user", content: `Candidate profile:\n${JSON.stringify(prof)}\n\nScore how well each job below fits this candidate (skills, seniority, domain). Penalise jobs that require a local language the candidate does not speak, or far more or less seniority. You must call the save_scores tool exactly once and include every index; do not reply with plain text.\n\nJobs:\n${list}` }]
       });
       (out.scores || []).forEach(s => {
         const j = chunk[s.i];
