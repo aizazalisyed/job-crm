@@ -5,7 +5,7 @@
   const stageColor = (k) => (STAGES.find(s => s.key === k) || STAGES[0]).color;
   const ACTIVE = ["Applied", "Screening", "Interview"];
 
-  const state = { jobs: [], contacts: [], settings: { countries: [] }, search: "", sort: { key: "updatedAt", dir: -1 } };
+  const state = { jobs: [], contacts: [], settings: { countries: [] }, search: "", sort: { key: "updatedAt", dir: -1 }, selected: new Set() };
 
   const VIEWS = {
     dashboard: ["Dashboard", "Your job search at a glance"],
@@ -177,14 +177,18 @@
     link: ["", "link", j => j.link ? `<a class="link" href="${esc(j.link)}" target="_blank" rel="noopener" data-stop>Open ↗</a>` : ""]
   };
 
-  function tableHtml(rows, cols, sortable = true) {
+  function tableHtml(rows, cols, sortable = true, selectable = false) {
     if (!rows.length) return `<tbody><tr><td><div class="empty">No jobs match</div></td></tr></tbody>`;
-    const head = cols.map(c => {
+    const allOn = selectable && rows.every(j => state.selected.has(j.id));
+    const someOn = selectable && !allOn && rows.some(j => state.selected.has(j.id));
+    const selHead = selectable ? `<th class="sel" data-stop><input type="checkbox" id="selAll" ${allOn ? "checked" : ""} ${someOn ? "data-indeterminate" : ""} aria-label="Select all" /></th>` : "";
+    const selCell = j => selectable ? `<td class="sel" data-stop><input type="checkbox" data-sel="${j.id}" ${state.selected.has(j.id) ? "checked" : ""} aria-label="Select" /></td>` : "";
+    const head = selHead + cols.map(c => {
       const [label, key] = COLS[c];
       const arrow = sortable && state.sort.key === key ? (state.sort.dir > 0 ? " ↑" : " ↓") : "";
       return `<th ${sortable ? `data-sort="${key}"` : ""}>${label}${arrow}</th>`;
     }).join("");
-    const body = rows.map(j => `<tr data-job="${j.id}">${cols.map(c => `<td>${COLS[c][2](j)}</td>`).join("")}</tr>`).join("");
+    const body = rows.map(j => `<tr data-job="${j.id}" class="${selectable && state.selected.has(j.id) ? "row-sel" : ""}">${selCell(j)}${cols.map(c => `<td>${COLS[c][2](j)}</td>`).join("")}</tr>`).join("");
     return `<thead><tr>${head}</tr></thead><tbody>${body}</tbody>`;
   }
 
@@ -199,7 +203,32 @@
       });
   }
   function renderJobs() {
-    $("#jobsTable").innerHTML = tableHtml(filteredJobs(), ["role", "country", "status", "priority", "fitScore", "deadline", "applicants", "visa", "workMode", "appliedDate", "followUpDate", "source", "link"]);
+    const rows = filteredJobs();
+    // drop selections that no longer exist
+    const ids = new Set(state.jobs.map(j => j.id));
+    [...state.selected].forEach(id => { if (!ids.has(id)) state.selected.delete(id); });
+    $("#jobsTable").innerHTML = tableHtml(rows, ["role", "country", "status", "priority", "fitScore", "deadline", "applicants", "visa", "workMode", "appliedDate", "followUpDate", "source", "link"], true, true);
+    const all = $("#selAll"); if (all && all.hasAttribute("data-indeterminate")) all.indeterminate = true;
+    const n = state.selected.size;
+    $("#bulkBar").hidden = n === 0;
+    $("#bulkCount").textContent = `${n} selected`;
+  }
+
+  async function removeSelected() {
+    const ids = [...state.selected];
+    if (!ids.length) return;
+    if (!confirm(`Remove ${ids.length} job${ids.length === 1 ? "" : "s"} from your tracker? This can't be undone.`)) return;
+    toast(`Removing ${ids.length}…`);
+    for (let i = 0; i < ids.length; i += 20) {
+      await Promise.all(ids.slice(i, i + 20).flatMap(id => [
+        Store.remove("jobs", id),
+        Store.remove("applications", id).catch(() => {})   // its tailored CV / cover letter, if any
+      ]));
+    }
+    state.selected.clear();
+    state.jobs = await Store.list("jobs");
+    toast(`Removed ${ids.length} job${ids.length === 1 ? "" : "s"}`);
+    render();
   }
 
   // ---------- kanban ----------
@@ -356,6 +385,17 @@
     ["#fStatus", "#fCountry", "#fPriority", "#fVisa"].forEach(s => $(s).addEventListener("change", renderJobs));
     $("#pipeCountry").addEventListener("change", renderKanban);
     $("#exportCsvBtn").onclick = exportCsv;
+    $("#jobsTable").addEventListener("change", e => {
+      if (e.target.id === "selAll") {
+        const rows = filteredJobs();
+        if (e.target.checked) rows.forEach(j => state.selected.add(j.id)); else rows.forEach(j => state.selected.delete(j.id));
+      } else if (e.target.dataset.sel) {
+        e.target.checked ? state.selected.add(e.target.dataset.sel) : state.selected.delete(e.target.dataset.sel);
+      } else return;
+      renderJobs();
+    });
+    $("#bulkRemoveBtn").onclick = () => removeSelected().catch(err => toast(err.message));
+    $("#bulkClearBtn").onclick = () => { state.selected.clear(); renderJobs(); };
 
     // row / card clicks
     document.addEventListener("click", e => {

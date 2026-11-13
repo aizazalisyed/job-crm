@@ -373,3 +373,10 @@ textarea.letter { font-size: 14px; line-height: 1.55; }
 .src { font-weight: 600; color: var(--primary); }
 .chip-check.world { border-style: dashed; font-weight: 600; }
 .chip-check.world.on { border-style: solid; }
+
+/* Bulk select */
+.table th.sel, .table td.sel { width: 36px; padding-right: 0; cursor: default; }
+.table td.sel input, .table th.sel input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--primary); }
+.table tr.row-sel { background: var(--primary-soft); }
+.bulk-bar { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: 8px; background: var(--primary-soft); font-size: 13px; font-weight: 600; }
+.bulk-bar[hidden] { display: none; }
