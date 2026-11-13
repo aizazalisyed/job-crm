@@ -10,6 +10,11 @@ A personal CRM for tracking job applications across target countries. It's a sta
 - **Contacts:** recruiters and hiring managers, linked to jobs
 - **Settings:** target countries, JSON backup and import, sample data, and a light/dark theme
 
+## AI Job Match and Apply
+- Upload your CV once. Claude extracts your profile and your full CV.
+- Search LinkedIn, Indeed, Glassdoor and Bayt (via Apify) in your target countries. Claude scores each job and reads the application deadline from the description. Applicants count comes from LinkedIn; anything unavailable shows N/A.
+- **Apply** opens a panel where Claude tailors your CV to the job (reordering and rewording your real experience only, never inventing), writes a cover letter and form answers, and asks you for any missing details. Download the CV and letter as PDF or Word, open the application page, submit, then mark it as Applied.
+
 ## Data storage
 Everything is stored in Cloud Firestore under your Google account, and nothing is saved in the browser:
 - `users/{uid}/jobs`, `users/{uid}/contacts`

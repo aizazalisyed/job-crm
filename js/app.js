@@ -28,6 +28,12 @@
     const label = n < 0 ? `${-n}d overdue` : n === 0 ? "Today" : n === 1 ? "Tomorrow" : fmtDate(d);
     return `<span class="date-chip ${cls}">${label}</span>`;
   }
+  function deadlineChip(d) {
+    const n = daysFromToday(d);
+    const cls = n < 0 ? "overdue" : n <= 3 ? "today" : "";
+    const label = n < 0 ? "Closed" : n === 0 ? "Today" : n === 1 ? "Tomorrow" : fmtDate(d);
+    return `<span class="date-chip ${cls}" title="Apply by ${esc(d)}">${label}</span>`;
+  }
   const pill = (status) => `<span class="pill"><span class="dot" style="background:${stageColor(status)}"></span>${esc(status)}</span>`;
 
   // ---------- data ----------
@@ -165,6 +171,8 @@
     workMode: ["Mode", "workMode", j => esc(j.workMode)],
     appliedDate: ["Applied", "appliedDate", j => fmtDate(j.appliedDate) || "–"],
     followUpDate: ["Follow-up", "followUpDate", j => dateChip(j.followUpDate) || "–"],
+    deadline: ["Deadline", "deadline", j => j.deadline ? deadlineChip(j.deadline) : `<span class="cell-sub">N/A</span>`],
+    applicants: ["Applicants", "applicants", j => j.applicants ? esc(j.applicants) : `<span class="cell-sub">N/A</span>`],
     source: ["Source", "source", j => esc(j.source)],
     link: ["", "link", j => j.link ? `<a class="link" href="${esc(j.link)}" target="_blank" rel="noopener" data-stop>Open ↗</a>` : ""]
   };
@@ -191,7 +199,7 @@
       });
   }
   function renderJobs() {
-    $("#jobsTable").innerHTML = tableHtml(filteredJobs(), ["role", "country", "status", "priority", "fitScore", "visa", "workMode", "appliedDate", "followUpDate", "source", "link"]);
+    $("#jobsTable").innerHTML = tableHtml(filteredJobs(), ["role", "country", "status", "priority", "fitScore", "deadline", "applicants", "visa", "workMode", "appliedDate", "followUpDate", "source", "link"]);
   }
 
   // ---------- kanban ----------
@@ -210,6 +218,7 @@
             <span class="tag prio-${esc(j.priority)}">${esc(j.priority)}</span>
             ${j.visa ? `<span class="tag visa-yes">Visa</span>` : ""}
             ${j.followUpDate ? dateChip(j.followUpDate) : ""}
+            ${j.deadline && !["Applied", "Screening", "Interview", "Offer", "Rejected", "Withdrawn"].includes(j.status) ? `<span class="tag" title="Application deadline">⏳ ${deadlineChip(j.deadline)}</span>` : ""}
           </div></div>`).join("")}
       </div>`;
     }).join("");
@@ -319,7 +328,7 @@
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
   }
   function exportCsv() {
-    const keys = ["title", "company", "country", "city", "status", "priority", "workMode", "source", "fitScore", "salary", "appliedDate", "followUpDate", "visa", "language", "contact", "link", "notes"];
+    const keys = ["title", "company", "country", "city", "status", "priority", "workMode", "source", "fitScore", "salary", "appliedDate", "followUpDate", "deadline", "applicants", "visa", "language", "contact", "link", "notes"];
     const q = v => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const csv = [keys.join(","), ...filteredJobs().map(j => keys.map(k => q(j[k])).join(","))].join("\n");
     download(`jobs-${todayStr()}.csv`, csv, "text/csv");
@@ -378,6 +387,15 @@
       state.jobs = await Store.list("jobs");
       closeModals(); toast("Job saved"); render();
     });
+    $("#prepareAppBtn").onclick = async () => {
+      const f = $("#jobForm");
+      const data = formData(f);
+      if (!data.title || !data.company) return toast("Add the job title and company first");
+      const saved = await Store.save("jobs", data);   // save edits (incl. pasted description) first
+      state.jobs = await Store.list("jobs");
+      closeModals(); render();
+      window.ApplyFlow.open(saved.id);
+    };
     $("#deleteJobBtn").onclick = async () => {
       const id = $("#jobForm").elements.id.value;
       if (!id || !confirm("Delete this job?")) return;

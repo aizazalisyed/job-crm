@@ -8,7 +8,8 @@
  *   users/{uid}/jobs/{jobId}
  *   users/{uid}/contacts/{contactId}
  *   users/{uid}/meta/settings       (countries, CV profile, theme, search preferences)
- *   users/{uid}/meta/matchResults   (last AI Job Match results)
+ *   users/{uid}/matches/{id}        (last AI Job Match results, with full job descriptions)
+ *   users/{uid}/applications/{jobId} (tailored CV, cover letter and answers per job)
  *   users/{uid}/private/keys        (Claude API key, Apify token)
  *
  * Data shapes
@@ -83,6 +84,11 @@ class FirebaseAdapter {
     const out = { ...data, createdAt: data.createdAt || now, updatedAt: now };
     await this.F.setDoc(ref, out, { merge: true });
     return { ...out, id: ref.id };
+  }
+
+  async getOne(name, id) {
+    const snap = await this.F.getDoc(this.F.doc(this._col(name), id));
+    return snap.exists() ? { ...snap.data(), id: snap.id } : null;
   }
 
   async remove(name, id) { await this.F.deleteDoc(this.F.doc(this._col(name), id)); }

@@ -206,14 +206,19 @@
           <label>Salary / range<input class="input" name="salary" placeholder="e.g. €55k to €65k" /></label>
           <label>Date applied<input class="input" type="date" name="appliedDate" /></label>
           <label>Follow-up date<input class="input" type="date" name="followUpDate" /></label>
-          <label class="span-2">Job link<input class="input" type="url" name="link" placeholder="https://www.linkedin.com/jobs/view/…" /></label>
+          <label>Application deadline<input class="input" type="date" name="deadline" /></label>
+          <label>Applicants so far<input class="input" name="applicants" placeholder="e.g. Over 100 applicants (blank = N/A)" /></label>
+          <label>Job link<input class="input" type="url" name="link" placeholder="https://www.linkedin.com/jobs/view/…" /></label>
+          <label>Application link<input class="input" type="url" name="applyUrl" placeholder="Where you submit the application" /></label>
           <label>Contact person<input class="input" name="contact" list="contactList" /></label>
           <label>Language requirement<input class="input" name="language" placeholder="e.g. English only" /></label>
           <label class="check span-2"><input type="checkbox" name="visa" /> Visa sponsorship or relocation support offered</label>
           <label class="span-2">Notes<textarea class="input" name="notes" rows="3"></textarea></label>
+          <label class="span-2">Job description <span class="hint">(used by Claude to tailor your CV)</span><textarea class="input" name="description" rows="4" placeholder="Paste the job description here"></textarea></label>
         </div>
         <div class="modal-foot">
           <button type="button" class="btn danger ghost" id="deleteJobBtn">Delete</button>
+          <button type="button" class="btn" id="prepareAppBtn">✨ Prepare application</button>
           <span class="spacer"></span>
           <button type="button" class="btn" data-close>Cancel</button>
           <button type="submit" class="btn primary">Save job</button>
@@ -270,5 +275,6 @@
   <script src="js/store.js"></script>
   <script src="js/app.js"></script>
   <script src="js/match.js"></script>
+  <script src="js/apply.js"></script>
 </body>
 </html>

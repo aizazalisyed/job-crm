@@ -15,19 +15,36 @@ window.JobMatch = (() => {
 
   const EMPTY_KEYS = { anthropicKey: "", apifyToken: "", model: "" };
   const DEFAULT_MODEL = "claude-sonnet-5-5";
-  const ACTOR = "valig~linkedin-jobs-scraper";
+  const LINKEDIN_ACTOR = "valig~linkedin-jobs-scraper";      // cheap, LinkedIn only
+  const BOARDS_ACTOR = "openclawai~job-board-scraper";       // Indeed, Glassdoor, Bayt
+  const SOURCES = {
+    linkedin: { label: "LinkedIn", costPerJob: 0.0004 },
+    indeed: { label: "Indeed", costPerJob: 0.006 },
+    glassdoor: { label: "Glassdoor", costPerJob: 0.006 },
+    bayt: { label: "Bayt (Gulf)", costPerJob: 0.006 }
+  };
+  const HOURS = { r86400: 24, r604800: 168, r2592000: 720 };
   const DATE_OPTS = { r86400: "Past 24 hours", r604800: "Past week", r2592000: "Past month" };
 
   // Everything below lives in memory only and is loaded from Firebase after sign-in.
   let keys = { ...EMPTY_KEYS };
   let results = [];
-  const DEFAULT_PREFS = { countries: null, datePosted: "r604800", perCountry: 25, minScore: 0 };
+  const DEFAULT_PREFS = { countries: null, datePosted: "r604800", perCountry: 25, minScore: 0, sources: ["linkedin", "indeed", "glassdoor"] };
   let prefs = { ...DEFAULT_PREFS };
   let busy = false;
   let status = "";
 
   const savePrefs = () => { state.settings.matchPrefs = { ...prefs }; Store.saveSettings(state.settings).catch(e => toast(e.message)); };
-  const saveResults = () => Store.saveMeta("matchResults", { items: results, savedAt: new Date().toISOString() }).catch(e => toast("Couldn't save results: " + e.message));
+  // Each result is its own Firestore doc in users/{uid}/matches (keeps the full job description for applications).
+  const saveResults = () => Store.replaceAll("matches", results).catch(e => toast("Couldn't save results: " + e.message));
+  const safeId = (src, raw) => (src + "-" + String(raw || Math.random()).replace(/[^A-Za-z0-9_-]/g, "_")).slice(0, 140);
+  const cleanText = t => String(t || "").replace(/\r/g, "").replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+  async function pool(tasks, limit) {
+    const out = []; let i = 0;
+    const worker = async () => { while (i < tasks.length) { const k = i++; try { out[k] = { ok: true, value: await tasks[k]() }; } catch (e) { out[k] = { ok: false, error: e }; } } };
+    await Promise.all(Array.from({ length: Math.min(limit, tasks.length) }, worker));
+    return out;
+  }
   const profile = () => state.settings.profile || null;
   const targetCountries = () => state.settings.countries || [];
   const selectedCountries = () => (prefs.countries || targetCountries()).filter(c => targetCountries().includes(c));
@@ -74,9 +91,24 @@ window.JobMatch = (() => {
         industries: { type: "array", items: { type: "string" } },
         languages: { type: "array", items: { type: "string" } },
         summary: { type: "string", description: "Two or three sentence summary of the candidate" },
-        searchKeywords: { type: "array", items: { type: "string" }, description: "6 to 8 short job titles this candidate should search on LinkedIn, using titles common in European job markets" }
+        searchKeywords: { type: "array", items: { type: "string" }, description: "6 to 8 short job titles this candidate should search on LinkedIn, using titles common in European job markets" },
+        cv: {
+          type: "object",
+          description: "The COMPLETE CV content, copied faithfully (word for word where possible). Do not summarise, drop or invent anything.",
+          properties: {
+            contact: { type: "object", properties: { email: { type: "string" }, phone: { type: "string" }, location: { type: "string" }, linkedin: { type: "string" }, website: { type: "string" } } },
+            summary: { type: "string" },
+            experience: { type: "array", items: { type: "object", properties: { title: { type: "string" }, company: { type: "string" }, location: { type: "string" }, start: { type: "string" }, end: { type: "string" }, bullets: { type: "array", items: { type: "string" } } }, required: ["title", "company", "bullets"] } },
+            education: { type: "array", items: { type: "object", properties: { degree: { type: "string" }, institution: { type: "string" }, location: { type: "string" }, start: { type: "string" }, end: { type: "string" }, details: { type: "string" } } } },
+            certifications: { type: "array", items: { type: "string" } },
+            skills: { type: "array", items: { type: "string" } },
+            languages: { type: "array", items: { type: "string" } },
+            other: { type: "array", description: "Any other sections (projects, awards, publications…)", items: { type: "object", properties: { heading: { type: "string" }, items: { type: "array", items: { type: "string" } } } } }
+          },
+          required: ["experience"]
+        }
       },
-      required: ["name", "headline", "skills", "summary", "searchKeywords"]
+      required: ["name", "headline", "skills", "summary", "searchKeywords", "cv"]
     }
   };
 
@@ -95,7 +127,8 @@ window.JobMatch = (() => {
               score: { type: "integer", minimum: 1, maximum: 10, description: "10 = excellent fit for this candidate" },
               reason: { type: "string", description: "Why, in at most 20 words" },
               visa: { type: "boolean", description: "True only if the posting mentions visa sponsorship, relocation support or work permit help" },
-              language: { type: "string", description: "Required languages other than English, or empty string" }
+              language: { type: "string", description: "Required languages other than English, or empty string" },
+              deadline: { type: "string", description: "Application deadline as YYYY-MM-DD if the posting clearly states one, otherwise empty string. Never guess." }
             },
             required: ["i", "score", "reason"]
           }
@@ -142,9 +175,9 @@ window.JobMatch = (() => {
     try {
       const content = await cvContent(file);
       const p = await claude({
-        max_tokens: 2000,
+        max_tokens: 12000,
         tools: [PROFILE_TOOL],
-        messages: [{ role: "user", content: [...content, { type: "text", text: "Read this CV and extract the candidate profile. You must call the save_profile tool exactly once; do not reply with plain text. For searchKeywords, suggest job titles that match the candidate's real experience level and that employers in Europe actually use on LinkedIn." }] }]
+        messages: [{ role: "user", content: [...content, { type: "text", text: "Read this CV and extract the candidate profile. You must call the save_profile tool exactly once; do not reply with plain text. Copy the full CV into the cv field faithfully, keeping every role and every bullet. For searchKeywords, suggest job titles that match the candidate's real experience level and that employers in Europe actually use on LinkedIn." }] }]
       });
       p.fileName = file.name;
       p.parsedAt = new Date().toISOString();
@@ -163,34 +196,59 @@ window.JobMatch = (() => {
     return `https://www.linkedin.com/jobs/search/?keywords=${encodeURIComponent(q)}&location=${encodeURIComponent(country)}&f_TPR=${prefs.datePosted}`;
   }
 
-  async function searchCountry(country, keywords) {
-    const token = keys.apifyToken;
-    const url = `https://api.apify.com/v2/acts/${ACTOR}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=240&clean=true&format=json`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ keywords: booleanQuery(keywords), location: country, datePosted: prefs.datePosted, limit: Number(prefs.perCountry) })
-    });
+  async function apifyRun(actor, input) {
+    const url = `https://api.apify.com/v2/acts/${actor}/run-sync-get-dataset-items?token=${encodeURIComponent(keys.apifyToken)}&timeout=290&clean=true&format=json`;
+    const res = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
     if (!res.ok) {
       const t = await res.text().catch(() => "");
-      throw new Error(`Apify (${country}): ${res.status} ${t.slice(0, 160)}`);
+      throw new Error(`${res.status} ${t.slice(0, 160)}`);
     }
     const items = await res.json();
-    return (Array.isArray(items) ? items : []).map(it => ({
-      id: String(it.id || it.url || Math.random()),
+    return Array.isArray(items) ? items : [];
+  }
+
+  async function searchLinkedIn(country, keywords) {
+    const items = await apifyRun(LINKEDIN_ACTOR, { keywords: booleanQuery(keywords), location: country, datePosted: prefs.datePosted, limit: Number(prefs.perCountry) })
+      .catch(e => { throw new Error(`LinkedIn (${country}): ${e.message}`); });
+    return items.map(it => ({
+      id: safeId("li", it.id || it.url),
+      source: "LinkedIn",
       title: it.title || "",
       company: it.companyName || "",
       location: it.location || country,
       country,
-      url: it.url || it.applyUrl || "",
+      url: it.url || "",
+      applyUrl: it.applyUrl || it.url || "",
       postedTimeAgo: it.postedTimeAgo || "",
       postedDate: it.postedDate || "",
       salary: it.salary || "",
       workType: it.workType || "",
       experienceLevel: it.experienceLevel || "",
-      applicationsCount: it.applicationsCount || "",
-      description: (it.description || "").replace(/\s+/g, " ").slice(0, 1500)
+      applicants: it.applicationsCount || "",
+      description: cleanText(it.description).slice(0, 6000)
     }));
+  }
+
+  async function searchBoards(country, keywords, sites) {
+    const per = Math.max(5, Math.round(Number(prefs.perCountry) / 2));
+    const items = await apifyRun(BOARDS_ACTOR, {
+      searchTerms: keywords.slice(0, 2), location: country, sites, maxResults: per,
+      hoursOld: HOURS[prefs.datePosted], countryIndeed: country, descriptionFormat: "markdown",
+      proxyConfiguration: { useApifyProxy: true }
+    }).catch(e => { throw new Error(`${sites.map(x => SOURCES[x].label).join("/")} (${country}): ${e.message}`); });
+    return items.filter(it => it.title && (it.job_url || it.job_url_direct)).map(it => {
+      const site = String(it.site || "").toLowerCase();
+      const sal = it.salary_min || it.salary_max ? [it.salary_min, it.salary_max].filter(Boolean).join(" to ") + (it.salary_currency ? " " + it.salary_currency : "") + (it.salary_interval ? " / " + it.salary_interval : "") : "";
+      return {
+        id: safeId(site || "board", it.id || it.job_url),
+        source: (SOURCES[site] && SOURCES[site].label.replace(" (Gulf)", "")) || it.site || "Job board",
+        title: it.title, company: it.company || "", location: it.location || country, country,
+        url: it.job_url || it.job_url_direct, applyUrl: it.job_url_direct || it.job_url,
+        postedTimeAgo: "", postedDate: it.date_posted || "", salary: sal,
+        workType: it.is_remote ? "Remote" : "", experienceLevel: "", applicants: "",
+        description: cleanText(it.description).slice(0, 6000)
+      };
+    });
   }
 
   async function scoreJobs(jobs) {
@@ -200,15 +258,16 @@ window.JobMatch = (() => {
     for (let i = 0; i < jobs.length; i += 20) chunks.push(jobs.slice(i, i + 20));
     let done = 0;
     const runChunk = async chunk => {
-      const list = chunk.map((j, i) => `[${i}] ${j.title} | ${j.company} | ${j.location} | ${j.experienceLevel} | ${j.workType}\n${j.description.slice(0, 900)}`).join("\n\n");
+      const desc = d => d.length > 1300 ? d.slice(0, 1000) + "\n…\n" + d.slice(-300) : d;
+      const list = chunk.map((j, i) => `[${i}] ${j.title} | ${j.company} | ${j.location} | ${j.experienceLevel} | ${j.workType}\n${desc(j.description)}`).join("\n\n");
       const out = await claude({
         max_tokens: 3000,
         tools: [SCORE_TOOL],
-        messages: [{ role: "user", content: `Candidate profile:\n${JSON.stringify(prof)}\n\nScore how well each job below fits this candidate (skills, seniority, domain). Penalise jobs that require a local language the candidate does not speak, or far more or less seniority. You must call the save_scores tool exactly once and include every index; do not reply with plain text.\n\nJobs:\n${list}` }]
+        messages: [{ role: "user", content: `Candidate profile:\n${JSON.stringify(prof)}\n\nScore how well each job below fits this candidate (skills, seniority, domain). Today is ${new Date().toISOString().slice(0, 10)}. Penalise jobs that require a local language the candidate does not speak, or far more or less seniority. You must call the save_scores tool exactly once and include every index; do not reply with plain text.\n\nJobs:\n${list}` }]
       });
       (out.scores || []).forEach(s => {
         const j = chunk[s.i];
-        if (j) Object.assign(j, { score: s.score, reason: s.reason, visa: !!s.visa, language: s.language || "" });
+        if (j) Object.assign(j, { score: s.score, reason: s.reason, visa: !!s.visa, language: s.language || "", deadline: /^\d{4}-\d{2}-\d{2}$/.test(s.deadline || "") ? s.deadline : "" });
       });
       done += chunk.length;
       setStatus(`Scoring with Claude… ${done}/${jobs.length}`);
@@ -226,49 +285,91 @@ window.JobMatch = (() => {
     if (!countries.length) return toast("Select at least one country");
     if (!p.searchKeywords || !p.searchKeywords.length) return toast("Add at least one search keyword");
 
-    setBusy(true, `Searching LinkedIn in ${countries.length} countr${countries.length === 1 ? "y" : "ies"}… this can take 1 to 3 minutes`);
+    const sources = (prefs.sources || []).filter(x => SOURCES[x]);
+    if (!sources.length) return toast("Select at least one job site");
+    const boardSites = sources.filter(x => x !== "linkedin");
+    const tasks = [];
+    countries.forEach(c => {
+      if (sources.includes("linkedin")) tasks.push(() => searchLinkedIn(c, p.searchKeywords));
+      if (boardSites.length) tasks.push(() => searchBoards(c, p.searchKeywords, boardSites));
+    });
+    const names = sources.map(x => SOURCES[x].label).join(", ");
+    setBusy(true, `Searching ${names} in ${countries.length} countr${countries.length === 1 ? "y" : "ies"}… this can take 2 to 5 minutes`);
     try {
-      const settled = await Promise.allSettled(countries.map(c => searchCountry(c, p.searchKeywords)));
-      const errors = settled.filter(s => s.status === "rejected").map(s => s.reason.message);
+      const settled = await pool(tasks, 4);
+      const errors = settled.filter(s => !s.ok).map(s => s.error.message);
       const seen = new Set();
-      const jobs = settled.filter(s => s.status === "fulfilled").flatMap(s => s.value)
-        .filter(j => { const k = j.url || j.id; if (seen.has(k)) return false; seen.add(k); return true; });
+      const norm = t => (t || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+      const jobs = settled.filter(s => s.ok).flatMap(s => s.value)
+        .filter(j => { const k = norm(j.title) + "|" + norm(j.company) + "|" + j.country; if (seen.has(k)) return false; seen.add(k); return true; });
       if (!jobs.length) {
         results = []; saveResults();
         throw new Error(errors[0] || "No jobs found. Try a longer date range or different keywords.");
       }
       setStatus(`Found ${jobs.length} jobs. Scoring with Claude…`);
       await scoreJobs(jobs);
-      results = jobs.map(j => ({ ...j, description: j.description.slice(0, 400) }))
-        .sort((a, b) => (b.score || 0) - (a.score || 0));
+      results = jobs.sort((a, b) => (b.score || 0) - (a.score || 0));
       saveResults();
       toast(`${results.length} jobs found and scored`);
-      if (errors.length) toast(errors[0]);
+      if (errors.length) toast(`${errors.length} search(es) failed: ${errors[0]}`);
     } finally { setBusy(false); }
   }
 
   // ---------- add to tracker ----------
   const inTracker = r => state.jobs.some(j => (j.linkedinId && j.linkedinId === r.id) || (r.url && j.link === r.url));
+  function trackerJobFromResult(r) {
+    const mode = /remote/i.test(r.workType) ? "Remote" : /hybrid/i.test(r.workType) ? "Hybrid" : "On-site";
+    const city = r.location && r.location !== r.country ? r.location.split(",")[0] : "";
+    return {
+      title: r.title, company: r.company, country: r.country, city,
+      status: "Saved", priority: (r.score || 0) >= 8 ? "High" : (r.score || 0) >= 6 ? "Medium" : "Low",
+      workMode: mode, source: r.source === "LinkedIn" ? "LinkedIn" : "Job board", board: r.source || "",
+      fitScore: r.score || null, salary: r.salary || "",
+      appliedDate: "", followUpDate: "", link: safeUrl(r.url), applyUrl: safeUrl(r.applyUrl || r.url),
+      deadline: r.deadline || "", applicants: r.applicants || r.applicationsCount || "",
+      contact: "", language: r.language || "", visa: !!r.visa,
+      notes: r.reason ? `AI match: ${r.reason}` : "", description: r.description || "", linkedinId: r.id
+    };
+  }
+  // Returns the tracker job for a result, creating it if needed.
+  async function ensureTracked(r) {
+    const existing = state.jobs.find(j => (j.linkedinId && j.linkedinId === r.id) || (r.url && j.link === r.url));
+    if (existing) return existing;
+    const saved = await Store.save("jobs", trackerJobFromResult(r));
+    await window.JT.refreshJobs();
+    return state.jobs.find(j => j.id === saved.id) || saved;
+  }
   async function addToTracker(id) {
     const r = results.find(x => x.id === id);
     if (!r || inTracker(r)) return;
-    const mode = /remote/i.test(r.workType) ? "Remote" : /hybrid/i.test(r.workType) ? "Hybrid" : "On-site";
-    const city = r.location && r.location !== r.country ? r.location.split(",")[0] : "";
-    await Store.save("jobs", {
-      title: r.title, company: r.company, country: r.country, city,
-      status: "Saved", priority: (r.score || 0) >= 8 ? "High" : (r.score || 0) >= 6 ? "Medium" : "Low",
-      workMode: mode, source: "LinkedIn", fitScore: r.score || null, salary: r.salary,
-      appliedDate: "", followUpDate: "", link: safeUrl(r.url), contact: "", language: r.language || "",
-      visa: !!r.visa, notes: r.reason ? `AI match: ${r.reason}` : "", linkedinId: r.id
-    });
-    await window.JT.refreshJobs();
+    await ensureTracked(r);
     toast("Added to your tracker as Saved");
     render();
+  }
+  async function applyTo(id) {
+    const r = results.find(x => x.id === id);
+    if (!r) return;
+    const job = await ensureTracked(r);
+    render();
+    window.ApplyFlow.open(job.id);
   }
 
   // ---------- UI ----------
   function setBusy(b, msg) { busy = b; status = b ? (msg || "") : ""; render(); }
   function setStatus(msg) { status = msg; const el = $("#matchStatus"); if (el) el.textContent = msg; }
+
+  function estimateCost(nCountries) {
+    const src = prefs.sources || [];
+    const per = Number(prefs.perCountry);
+    const li = src.includes("linkedin") ? per * SOURCES.linkedin.costPerJob : 0;
+    const boards = src.filter(x => x !== "linkedin").length * Math.max(5, Math.round(per / 2)) * 2 * 0.006;
+    return nCountries * (li + boards) + 0.01;
+  }
+  const deadlineTag = d => {
+    if (!d) return "";
+    const n = Math.round((new Date(d + "T00:00:00") - new Date(new Date().toISOString().slice(0, 10) + "T00:00:00")) / 86400000);
+    return `<span class="tag ${n < 0 ? "tag-bad" : n <= 7 ? "tag-warn" : ""}">${n < 0 ? "Deadline passed" : "Apply by " + esc(d)}</span>`;
+  };
 
   function chips(list, cls = "tag") { return (list || []).map(x => `<span class="${cls}">${esc(x)}</span>`).join(" "); }
 
@@ -282,7 +383,7 @@ window.JobMatch = (() => {
     view.innerHTML = `
       ${!hasA || !hasP ? `<div class="notice">
         ${!hasA ? "Add your <strong>Claude API key</strong> in Settings to analyse your CV and score jobs. " : ""}
-        ${!hasP ? "Add an <strong>Apify token</strong> in Settings to pull LinkedIn jobs into this page. Without it you can still use the LinkedIn search links." : ""}
+        ${!hasP ? "Add an <strong>Apify token</strong> in Settings to pull jobs from LinkedIn, Indeed and Glassdoor into this page. Without it you can still use the LinkedIn search links." : ""}
         <a class="link" href="#settings">Open Settings</a></div>` : ""}
 
       <div class="grid-2">
@@ -315,6 +416,9 @@ window.JobMatch = (() => {
           <div class="field-label" style="margin-top:14px">Countries <span class="hint">(edit the list in Settings)</span></div>
           <div class="chips">${targetCountries().map(c => `<label class="chip-check ${sel.includes(c) ? "on" : ""}"><input type="checkbox" data-country="${esc(c)}" ${sel.includes(c) ? "checked" : ""} hidden />${esc(c)}</label>`).join("") || `<span class="hint">No target countries yet</span>`}</div>
 
+          <div class="field-label" style="margin-top:14px">Job sites</div>
+          <div class="chips">${Object.entries(SOURCES).map(([k, v]) => `<label class="chip-check ${(prefs.sources || []).includes(k) ? "on" : ""}"><input type="checkbox" data-source="${k}" ${(prefs.sources || []).includes(k) ? "checked" : ""} hidden />${v.label}</label>`).join("")}</div>
+
           <div class="form-grid" style="margin-top:12px">
             <label>Date posted<select class="select" id="mDate">${Object.entries(DATE_OPTS).map(([v, l]) => `<option value="${v}" ${prefs.datePosted === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
             <label>Jobs per country<select class="select" id="mPer">${[10, 25, 50].map(n => `<option ${Number(prefs.perCountry) === n ? "selected" : ""}>${n}</option>`).join("")}</select></label>
@@ -322,7 +426,7 @@ window.JobMatch = (() => {
           <div class="btn-row" style="margin-top:14px">
             <button class="btn primary" id="findBtn" ${busy || !hasP || !hasA ? "disabled" : ""}>✨ Find and score jobs</button>
           </div>
-          <div class="hint" style="margin-top:8px">Rough cost per search: about $${(sel.length * prefs.perCountry * 0.0004 + 0.01).toFixed(2)} on Apify plus a few cents of Claude API usage.</div>
+          <div class="hint" style="margin-top:8px">Rough cost per search: about $${estimateCost(sel.length).toFixed(2)} on Apify plus a few cents of Claude API usage.</div>
 
           <details class="li-links"><summary>Free option: open these searches on LinkedIn</summary>
             ${sel.map(c => safeUrl(linkedinUrl(c)) ? `<a class="link" href="${esc(linkedinUrl(c))}" target="_blank" rel="noopener">${esc(c)} ↗</a>` : "").join("")}
@@ -347,7 +451,7 @@ window.JobMatch = (() => {
             <div class="match-score s${Math.round((r.score || 0) / 2)}">${r.score || "–"}</div>
             <div class="match-main">
               <div class="match-title">${esc(r.title)}</div>
-              <div class="match-sub">${esc(r.company)} · ${esc(r.location)}${r.postedTimeAgo ? ` · ${esc(r.postedTimeAgo)}` : ""}</div>
+              <div class="match-sub">${esc(r.company)} · ${esc(r.location)}${r.postedTimeAgo ? ` · ${esc(r.postedTimeAgo)}` : r.postedDate ? ` · posted ${esc(r.postedDate)}` : ""} · <span class="src">${esc(r.source || "LinkedIn")}</span></div>
               ${r.reason ? `<div class="match-reason">${esc(r.reason)}</div>` : ""}
               <div class="kcard-meta">
                 ${r.visa ? `<span class="tag visa-yes">Visa / relocation</span>` : ""}
@@ -355,11 +459,13 @@ window.JobMatch = (() => {
                 ${r.workType ? `<span class="tag">${esc(r.workType)}</span>` : ""}
                 ${r.experienceLevel ? `<span class="tag">${esc(r.experienceLevel)}</span>` : ""}
                 ${r.salary ? `<span class="tag">${esc(r.salary)}</span>` : ""}
-                ${r.applicationsCount ? `<span class="tag">${esc(r.applicationsCount)}</span>` : ""}
+                <span class="tag">Applicants: ${esc(r.applicants || r.applicationsCount || "N/A")}</span>
+                ${r.deadline ? deadlineTag(r.deadline) : `<span class="tag">Deadline: N/A</span>`}
               </div>
             </div>
             <div class="match-actions">
-              ${inTracker(r) ? `<span class="hint">✓ In tracker</span>` : `<button class="btn primary" data-add="${esc(r.id)}">+ Track</button>`}
+              <button class="btn primary" data-apply="${esc(r.id)}">✨ Apply</button>
+              ${inTracker(r) ? `<span class="hint" style="text-align:center">✓ In tracker</span>` : `<button class="btn" data-add="${esc(r.id)}">+ Track</button>`}
               ${safeUrl(r.url) ? `<a class="btn" href="${esc(r.url)}" target="_blank" rel="noopener">Open ↗</a>` : ""}
             </div>
           </div>`).join("") || `<div class="empty">No jobs at this fit level</div>`}
@@ -400,6 +506,12 @@ window.JobMatch = (() => {
     const min = $("#mMin", view); if (min) min.onchange = () => { prefs.minScore = Number(min.value); savePrefs(); render(); };
     const find = $("#findBtn", view); if (find) find.onclick = run(findJobs);
     view.querySelectorAll("[data-add]").forEach(b => b.onclick = run(() => addToTracker(b.dataset.add)));
+    view.querySelectorAll("[data-apply]").forEach(b => b.onclick = run(() => applyTo(b.dataset.apply)));
+    view.querySelectorAll("[data-source]").forEach(cb => cb.onchange = () => {
+      const cur = new Set(prefs.sources || []);
+      cb.checked ? cur.add(cb.dataset.source) : cur.delete(cb.dataset.source);
+      prefs.sources = Object.keys(SOURCES).filter(k => cur.has(k)); savePrefs(); render();
+    });
   }
 
   // ---------- settings: keys ----------
@@ -429,9 +541,9 @@ window.JobMatch = (() => {
     if (!Store.user) return;
     prefs = { ...DEFAULT_PREFS, ...(state.settings.matchPrefs || {}) };
     try {
-      const [k, saved] = await Promise.all([Store.getKeys(), Store.getMeta("matchResults")]);
+      const [k, saved] = await Promise.all([Store.getKeys(), Store.list("matches")]);
       keys = { ...EMPTY_KEYS, ...k };
-      results = (saved && Array.isArray(saved.items)) ? saved.items : [];
+      results = saved.sort((a, b) => (b.score || 0) - (a.score || 0));
     } catch (err) { console.error("Loading AI Job Match data failed", err); toast("Couldn't load your keys: " + err.message); }
     fillForm();
   }
@@ -440,5 +552,5 @@ window.JobMatch = (() => {
 
   initKeysForm();
 
-  return { render, syncKeys, clearLocalKeys };
+  return { render, syncKeys, clearLocalKeys, claude, loadScript, getKeys: () => keys };
 })();

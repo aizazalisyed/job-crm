@@ -320,3 +320,54 @@ textarea.input { resize: vertical; }
 .match-actions { display: flex; flex-direction: column; gap: 6px; align-items: stretch; flex-shrink: 0; }
 .match-actions .btn { justify-content: center; }
 @media (max-width: 760px) { .match { flex-wrap: wrap; } .match-actions { flex-direction: row; width: 100%; } }
+
+/* Apply flow */
+.modal-box.wide { max-width: 980px; }
+.apply-body { padding: 18px 20px 22px; display: flex; flex-direction: column; gap: 14px; }
+.apply-steps { display: flex; gap: 10px; flex-wrap: wrap; }
+.astep { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); padding: 6px 12px; border-radius: 20px; background: var(--surface-2); }
+.astep span { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; background: var(--border); font-size: 11px; font-weight: 700; color: var(--text); }
+.astep.on { color: var(--primary); background: var(--primary-soft); }
+.astep.on span { background: var(--primary); color: #fff; }
+.astep.done { color: var(--s-offer); }
+.astep.done span { background: var(--s-offer); color: #fff; }
+.notice.warn { background: #fff3dc; color: #7a4a07; }
+[data-theme="dark"] .notice.warn { background: #3a2c12; color: #f0c27a; }
+.qbox { border: 2px solid var(--primary); border-radius: 12px; padding: 14px 16px; background: var(--primary-soft); }
+.qbox-head { font-weight: 700; margin-bottom: 10px; }
+.qrow { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; font-size: 13px; font-weight: 500; }
+.apply-actions { display: flex; flex-direction: column; gap: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.tab { border: 0; background: none; padding: 9px 14px; font: inherit; font-weight: 500; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+.tab.on { color: var(--primary); border-bottom-color: var(--primary); }
+.tab-body { min-height: 200px; }
+.cv-preview { border: 1px solid var(--border); border-radius: 10px; padding: 22px 26px; background: var(--surface); font-size: 13px; }
+.cv-preview p { margin: 4px 0; }
+.cv-preview ul { margin: 4px 0 6px; padding-left: 18px; }
+.cv-preview li { margin: 3px 0; padding: 1px 4px; border-radius: 4px; }
+.cvp-name { font-size: 20px; font-weight: 700; }
+.cvp-head { color: var(--muted); font-weight: 500; }
+.cvp-contact { color: var(--muted); font-size: 12px; margin-top: 2px; }
+.cvp-h { margin: 14px 0 6px; padding-bottom: 3px; border-bottom: 1px solid var(--primary); color: var(--primary); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+.cvp-role { margin: 8px 0; }
+.cvp-role-top { display: flex; justify-content: space-between; gap: 10px; }
+.cvp-role-top span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.cvp-co { color: var(--muted); font-size: 12px; }
+.hl, .hl-sample { background: #fff4c2; box-shadow: inset 3px 0 0 #e0a800; }
+[data-theme="dark"] .hl, [data-theme="dark"] .hl-sample { background: #3d3410; box-shadow: inset 3px 0 0 #d9a400; }
+.hl-sample { padding: 1px 6px; border-radius: 4px; }
+textarea.letter { font-size: 14px; line-height: 1.55; }
+.answers { display: flex; flex-direction: column; gap: 8px; }
+.answer { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
+.answer-q { font-weight: 600; font-size: 13px; grid-column: 1 / -1; }
+.answer-a { font-size: 13px; white-space: pre-wrap; }
+.btn.small { padding: 4px 10px; font-size: 12px; align-self: start; }
+.reqs { display: flex; flex-direction: column; gap: 8px; }
+.req { display: flex; gap: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; }
+.req-r { font-weight: 500; }
+.regen summary { cursor: pointer; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+.tag-bad { background: #fde8e8; color: var(--danger); }
+.tag-warn { background: #fff3dc; color: #a2620b; }
+[data-theme="dark"] .tag-bad { background: #3a1d1d; }
+[data-theme="dark"] .tag-warn { background: #3a2c12; color: #f0b45a; }
+.src { font-weight: 600; color: var(--primary); }
