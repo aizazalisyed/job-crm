@@ -9,6 +9,7 @@
 
   const VIEWS = {
     dashboard: ["Dashboard", "Your job search at a glance"],
+    match: ["AI Job Match", "Upload your CV and let Claude find relevant LinkedIn jobs"],
     pipeline: ["Pipeline", "Every application by stage"],
     jobs: ["All jobs", "Filter, sort and export your applications"],
     followups: ["Follow-ups", "Who you need to chase and when"],
@@ -88,6 +89,7 @@
     if (v === "followups") renderFollowups();
     if (v === "contacts") renderContacts();
     if (v === "settings") renderSettings();
+    if (v === "match" && window.JobMatch) window.JobMatch.render();
   }
 
   function renderLists() {
@@ -476,6 +478,8 @@
   }
 
   // ---------- init ----------
+  window.JT = { state, toast, esc, render, refreshJobs: async () => { state.jobs = await Store.list("jobs"); } };
+
   function showGate(msg, showButton) {
     $("#authGate").classList.remove("hidden");
     $("#authMsg").textContent = msg;

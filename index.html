@@ -21,6 +21,7 @@
       </div>
       <nav class="nav">
         <a href="#dashboard" class="nav-item" data-view="dashboard"><span class="ico">▦</span>Dashboard</a>
+        <a href="#match" class="nav-item" data-view="match"><span class="ico">✨</span>AI Job Match</a>
         <a href="#pipeline" class="nav-item" data-view="pipeline"><span class="ico">☰</span>Pipeline</a>
         <a href="#jobs" class="nav-item" data-view="jobs"><span class="ico">≡</span>All jobs</a>
         <a href="#followups" class="nav-item" data-view="followups"><span class="ico">⏰</span>Follow-ups<span class="badge" id="followupBadge"></span></a>
@@ -134,6 +135,9 @@
           <div class="contacts" id="contactsGrid"></div>
         </section>
 
+        <!-- AI Job Match (rendered by js/match.js) -->
+        <section class="view" id="view-match"></section>
+
         <!-- Settings -->
         <section class="view" id="view-settings">
           <div class="grid-2">
@@ -156,6 +160,22 @@
                 <button class="btn danger" id="clearBtn">Delete all data</button>
               </div>
             </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>AI and job search keys</h3></div>
+            <p class="muted">Used by AI Job Match. Keys are saved only in this browser on this device. They are never uploaded to GitHub or Firebase.</p>
+            <form class="form-grid" id="keysForm">
+              <label>Claude API key (from console.anthropic.com)<input class="input" type="password" name="anthropicKey" placeholder="sk-ant-…" autocomplete="off" /></label>
+              <label>Apify API token (from console.apify.com)<input class="input" type="password" name="apifyToken" placeholder="apify_api_…" autocomplete="off" /></label>
+              <label>Claude model
+                <select class="select" name="model">
+                  <option value="claude-sonnet-5-5">Claude Sonnet 5.5 (recommended)</option>
+                  <option value="claude-haiku-5-5">Claude Haiku 5.5 (cheapest)</option>
+                  <option value="claude-opus-5-5">Claude Opus 5.5 (most capable)</option>
+                </select>
+              </label>
+              <div class="btn-row" style="align-items:flex-end"><button class="btn primary">Save keys</button><button type="button" class="btn danger ghost" id="clearKeysBtn">Remove keys</button></div>
+            </form>
           </div>
           <div class="card">
             <div class="card-head"><h3>Backend</h3></div>
@@ -259,5 +279,6 @@
   <script src="js/firebase-config.js"></script>
   <script src="js/store.js"></script>
   <script src="js/app.js"></script>
+  <script src="js/match.js"></script>
 </body>
 </html>
