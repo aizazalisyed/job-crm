@@ -1,4 +1,8 @@
-# My Job Tracker
+<p align="center"><img src="assets/icon.svg" width="96" alt="My Job Tracker logo"></p>
+
+<h1 align="center">My Job Tracker</h1>
+<p align="center">Track applications. Match jobs with AI.</p>
+
 
 A personal tracker for job applications across target countries. It's a static site built with plain HTML, CSS and JavaScript, so there's no build step and it can be hosted on GitHub Pages.
 

@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>My Job Tracker</title>
+  <meta name="description" content="My Job Tracker: track job applications and find matching jobs with AI." />
+  <link rel="icon" type="image/svg+xml" href="assets/icon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+  <meta name="theme-color" content="#1f3fbf" />
+  <meta property="og:title" content="My Job Tracker" />
+  <meta property="og:description" content="Track applications. Match jobs with AI." />
+  <meta property="og:image" content="assets/social-preview.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
@@ -13,10 +21,10 @@
     <!-- Sidebar -->
     <aside class="sidebar" id="sidebar">
       <div class="brand">
-        <div class="brand-mark">MJT</div>
+        <img class="brand-logo" src="assets/icon.svg" alt="My Job Tracker logo" width="38" height="38" />
         <div>
           <div class="brand-name">My Job Tracker</div>
-          <div class="brand-sub">Your job search, organised</div>
+          <div class="brand-sub">Job search, organised</div>
         </div>
       </div>
       <nav class="nav">
@@ -262,7 +270,7 @@
   <!-- Sign-in screen (Firebase mode) -->
   <div class="auth-gate" id="authGate">
     <div class="auth-box">
-      <div class="brand-mark big">MJT</div>
+      <img class="brand-logo big" src="assets/icon.svg" alt="My Job Tracker logo" width="64" height="64" />
       <h2>My Job Tracker</h2>
       <p class="muted" id="authMsg">Loading…</p>
       <button class="btn primary" id="signInBtn" hidden>
