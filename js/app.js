@@ -34,10 +34,30 @@
     state.jobs = await Store.list("jobs");
     state.contacts = await Store.list("contacts");
     state.settings = await Store.getSettings();
-    if (!localStorage.getItem("jobtrack:seeded") && state.jobs.length === 0) {
-      await seed();
-      localStorage.setItem("jobtrack:seeded", "1");
+    if (Store === LocalStore) {
+      if (!localStorage.getItem("jobtrack:seeded") && state.jobs.length === 0) {
+        await seed();
+        localStorage.setItem("jobtrack:seeded", "1");
+      }
+      return;
     }
+    // Firebase: offer to move data saved in this browser up to the cloud, once.
+    const migratedKey = `jobtrack:migrated:${Store.user.uid}`;
+    const localJobs = await LocalStore.list("jobs");
+    let flagged = false;
+    try { flagged = !!localStorage.getItem(migratedKey); } catch {}
+    if (!flagged && state.jobs.length === 0 && localJobs.length > 0) {
+      if (confirm(`Found ${localJobs.length} job(s) saved in this browser. Upload them to your cloud account?\n\n(If they are only the sample jobs, press Cancel.)`)) {
+        await Store.replaceAll("jobs", localJobs);
+        await Store.replaceAll("contacts", await LocalStore.list("contacts"));
+        await Store.saveSettings(await LocalStore.getSettings());
+        state.jobs = await Store.list("jobs");
+        state.contacts = await Store.list("contacts");
+        state.settings = await Store.getSettings();
+        toast("Browser data uploaded to the cloud");
+      }
+    }
+    try { localStorage.setItem(migratedKey, "1"); } catch {}
   }
 
   function matchesSearch(j) {
@@ -456,10 +476,59 @@
   }
 
   // ---------- init ----------
+  function showGate(msg, showButton) {
+    $("#authGate").classList.remove("hidden");
+    $("#authMsg").textContent = msg;
+    $("#signInBtn").hidden = !showButton;
+  }
+
+  async function start() {
+    showGate("Loading your data…", false);
+    await load();
+    $("#authGate").classList.add("hidden");
+    if (Store.user) {
+      $("#userBox").hidden = false;
+      $("#userName").textContent = Store.user.displayName || Store.user.email || "Signed in";
+      if (Store.user.photoURL) $("#userAvatar").src = Store.user.photoURL;
+    }
+    route();
+  }
+
+  function friendlyError(err) {
+    const code = (err && err.code) || "";
+    if (code.includes("permission-denied")) return "Permission denied. Check the Firestore security rules.";
+    if (code.includes("unauthorized-domain")) return "This website is not in Firebase's authorized domains list.";
+    if (code.includes("popup-blocked")) return "Your browser blocked the sign-in popup. Allow popups for this site.";
+    if (code.includes("popup-closed")) return "Sign-in was cancelled.";
+    if (code.includes("unavailable")) return "You're offline. Changes will sync when you reconnect.";
+    return (err && err.message) || "Something went wrong";
+  }
+
   (async function init() {
     try { const t = localStorage.getItem("jobtrack:theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
     bind();
-    await load();
-    route();
+    window.addEventListener("unhandledrejection", e => { console.error(e.reason); toast(friendlyError(e.reason)); });
+
+    $("#signInBtn").onclick = async () => {
+      try { showGate("Signing in…", false); await Store.signIn(); await start(); }
+      catch (err) { showGate(friendlyError(err), true); }
+    };
+    $("#signOutBtn").onclick = async () => {
+      await Store.signOut();
+      state.jobs = []; state.contacts = [];
+      $("#userBox").hidden = true;
+      showGate("You're signed out.", true);
+    };
+
+    if (Store === LocalStore) { $("#authGate").classList.add("hidden"); await load(); route(); return; }
+    try {
+      showGate("Connecting…", false);
+      const user = await Store.init();
+      if (user) await start();
+      else showGate("Sign in to see your job tracker.", true);
+    } catch (err) {
+      console.error(err);
+      showGate("Couldn't connect to Firebase: " + friendlyError(err), false);
+    }
   })();
 })();

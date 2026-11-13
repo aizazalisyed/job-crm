@@ -11,12 +11,15 @@ A personal CRM for tracking job applications across target countries. It's a sta
 - **Settings:** target countries, JSON backup and import, sample data, and a light/dark theme
 
 ## Data storage
-For now, data lives in your browser's localStorage. Use **Settings > Export JSON backup** regularly.
+- **Local mode** (default): data lives in this browser's localStorage.
+- **Firebase mode**: you sign in with Google, and data is stored in Cloud Firestore under `users/{uid}/...`, so it syncs across all your devices. On first sign-in, the app offers to upload any jobs saved in the browser.
 
-## Moving to Firebase later
-1. Create a Firebase project with Firestore and Authentication.
-2. Paste the web config into `js/firebase-config.js` and set `enabled: true`.
-3. Implement the `FirebaseAdapter` methods in `js/store.js` (`list`, `save`, `remove`, `replaceAll`, `getSettings`, `saveSettings`). The UI only calls these methods, so no other file needs to change.
+## Firebase setup
+1. Create a project at console.firebase.google.com.
+2. Go to **Authentication > Sign-in method** and enable **Google**. Then go to **Authentication > Settings > Authorized domains** and add `aizazalisyed.github.io`.
+3. Go to **Firestore Database > Create database** and start in **production mode**.
+4. Go to **Firestore > Rules**, paste the contents of `firestore.rules`, and click **Publish**.
+5. Go to **Project settings > Your apps** and add a **Web** app. Copy the config into `js/firebase-config.js` and set `enabled: true`.
 
 ## Run locally
 Open `index.html` in a browser, or run `python3 -m http.server` in this folder.
