@@ -29,7 +29,17 @@ window.JobMatch = (() => {
   // Everything below lives in memory only and is loaded from Firebase after sign-in.
   let keys = { ...EMPTY_KEYS };
   let results = [];
-  const DEFAULT_PREFS = { countries: null, datePosted: "r604800", perCountry: 25, minScore: 0, sources: ["linkedin", "indeed", "glassdoor"], workMode: "any", showMode: "any" };
+  const DEFAULT_PREFS = { countries: null, datePosted: "r604800", perCountry: 25, minScore: 0, sources: ["linkedin", "indeed", "glassdoor"], workMode: "any", showMode: "any",
+    sortBy: "fit", fCountry: "", fSource: "", visaOnly: false, hideTracked: false, q: "" };
+  const SORTS = {
+    fit: "Best fit",
+    applicantsAsc: "Fewest applicants",
+    applicantsDesc: "Most applicants",
+    newest: "Newest first",
+    deadline: "Deadline soonest",
+    company: "Company A to Z",
+    country: "Country A to Z"
+  };
   const WORLD = "Worldwide";
   const TOP_N = 100;               // keep only the 100 most relevant jobs
   const WORLD_LIMIT = 200;         // LinkedIn jobs fetched for a worldwide search before ranking
@@ -392,6 +402,53 @@ window.JobMatch = (() => {
     return `<span class="tag ${n < 0 ? "tag-bad" : n <= 7 ? "tag-warn" : ""}">${n < 0 ? "Deadline passed" : "Apply by " + esc(d)}</span>`;
   };
 
+  // "Over 200 applicants" -> 201, "Be among the first 25 applicants" -> 24, "37 applicants" -> 37, unknown -> null
+  function applicantCount(r) {
+    const t = String(r.applicants || r.applicationsCount || "");
+    const m = t.replace(/,/g, "").match(/\d+/);
+    if (!m) return null;
+    const n = Number(m[0]);
+    return /over|more than|\+/i.test(t) ? n + 1 : /first|fewer|less than|under/i.test(t) ? n - 1 : n;
+  }
+  // hours since posted, from a date or "4 days ago"
+  function ageHours(r) {
+    const d = Date.parse(r.postedDate || "");
+    if (!isNaN(d)) return (Date.now() - d) / 3600000;
+    const m = String(r.postedTimeAgo || "").match(/(\d+)\s*(minute|hour|day|week|month)/i);
+    if (!m) return null;
+    return Number(m[1]) * { minute: 1 / 60, hour: 1, day: 24, week: 168, month: 720 }[m[2].toLowerCase()];
+  }
+  function filterAndSort(list) {
+    const showMode = MODE_LABEL[prefs.showMode];
+    const q = (prefs.q || "").toLowerCase().trim();
+    const out = list.filter(r =>
+      (r.score || 0) >= Number(prefs.minScore || 0) &&
+      (!showMode || r.workMode === showMode) &&
+      (!prefs.fCountry || r.country === prefs.fCountry) &&
+      (!prefs.fSource || (r.source || "LinkedIn") === prefs.fSource) &&
+      (!prefs.visaOnly || r.visa) &&
+      (!prefs.hideTracked || !inTracker(r)) &&
+      (!q || [r.title, r.company, r.location, r.reason, r.industry].some(v => (v || "").toLowerCase().includes(q))));
+    // unknown values (N/A) always go to the bottom
+    const by = (get, dir = 1) => (a, b) => {
+      const x = get(a), y = get(b);
+      if (x == null && y == null) return (b.score || 0) - (a.score || 0);
+      if (x == null) return 1; if (y == null) return -1;
+      return (typeof x === "string" ? x.localeCompare(y) : x - y) * dir || (b.score || 0) - (a.score || 0);
+    };
+    const cmp = {
+      fit: (a, b) => (b.score || 0) - (a.score || 0),
+      applicantsAsc: by(applicantCount, 1),
+      applicantsDesc: by(applicantCount, -1),
+      newest: by(ageHours, 1),
+      deadline: by(r => r.deadline || null, 1),
+      company: by(r => (r.company || "").toLowerCase() || null, 1),
+      country: by(r => (r.country || "").toLowerCase() || null, 1)
+    }[prefs.sortBy] || ((a, b) => (b.score || 0) - (a.score || 0));
+    return out.sort(cmp);
+  }
+  const activeFilters = () => [prefs.showMode !== "any", Number(prefs.minScore) > 0, prefs.fCountry, prefs.fSource, prefs.visaOnly, prefs.hideTracked, prefs.q].filter(Boolean).length;
+
   function chips(list, cls = "tag") { return (list || []).map(x => `<span class="${cls}">${esc(x)}</span>`).join(" "); }
 
   function render() {
@@ -399,8 +456,9 @@ window.JobMatch = (() => {
     const p = profile();
     const hasA = !!keys.anthropicKey, hasP = !!keys.apifyToken;
     const sel = selectedCountries();
-    const showMode = MODE_LABEL[prefs.showMode];
-    const shown = results.filter(r => (r.score || 0) >= Number(prefs.minScore || 0) && (!showMode || r.workMode === showMode));
+    const shown = filterAndSort(results);
+    const resCountries = [...new Set(results.map(r => r.country).filter(Boolean))].sort();
+    const resSources = [...new Set(results.map(r => r.source || "LinkedIn"))].sort();
 
     view.innerHTML = `
       ${!hasA || !hasP ? `<div class="notice">
@@ -464,13 +522,17 @@ window.JobMatch = (() => {
       <div class="card flush">
         <div class="card-head pad">
           <h3>Matches <span class="hint">${shown.length} of ${results.length}</span></h3>
-          <span class="spacer"></span>
-          <label class="hint" style="display:flex;gap:8px;align-items:center;margin-right:12px">Work mode
-            <select class="select" id="mShow" style="width:auto">${Object.entries(MODES).map(([v, l]) => `<option value="${v}" ${prefs.showMode === v ? "selected" : ""}>${v === "any" ? "All" : l}</option>`).join("")}</select>
-          </label>
-          <label class="hint" style="display:flex;gap:8px;align-items:center">Minimum fit
-            <select class="select" id="mMin" style="width:auto">${[0, 5, 6, 7, 8].map(n => `<option value="${n}" ${Number(prefs.minScore) === n ? "selected" : ""}>${n ? n + "+" : "All"}</option>`).join("")}</select>
-          </label>
+          ${activeFilters() ? `<button class="btn ghost small" id="mReset">Reset filters</button>` : ""}
+        </div>
+        <div class="filter-bar">
+          <label>Sort by<select class="select" id="mSort">${Object.entries(SORTS).map(([v, l]) => `<option value="${v}" ${prefs.sortBy === v ? "selected" : ""}>${l}</option>`).join("")}</select></label>
+          <label>Country<select class="select" id="mCountry"><option value="">All (${resCountries.length})</option>${resCountries.map(c => `<option ${prefs.fCountry === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
+          <label>Site<select class="select" id="mSource"><option value="">All</option>${resSources.map(c => `<option ${prefs.fSource === c ? "selected" : ""}>${esc(c)}</option>`).join("")}</select></label>
+          <label>Work mode<select class="select" id="mShow">${Object.entries(MODES).map(([v, l]) => `<option value="${v}" ${prefs.showMode === v ? "selected" : ""}>${v === "any" ? "All" : l}</option>`).join("")}</select></label>
+          <label>Minimum fit<select class="select" id="mMin">${[0, 5, 6, 7, 8, 9].map(n => `<option value="${n}" ${Number(prefs.minScore) === n ? "selected" : ""}>${n ? n + "+" : "All"}</option>`).join("")}</select></label>
+          <label class="grow">Search results<input class="input" id="mQ" value="${esc(prefs.q || "")}" placeholder="Title, company, city…" /></label>
+          <label class="check"><input type="checkbox" id="mVisa" ${prefs.visaOnly ? "checked" : ""} /> Visa / relocation only</label>
+          <label class="check"><input type="checkbox" id="mHide" ${prefs.hideTracked ? "checked" : ""} /> Hide jobs already in tracker</label>
         </div>
         <div class="matches">
           ${shown.map(r => `
@@ -532,6 +594,11 @@ window.JobMatch = (() => {
     const d = $("#mDate", view); if (d) d.onchange = () => { prefs.datePosted = d.value; savePrefs(); render(); };
     const md = $("#mMode", view); if (md) md.onchange = () => { prefs.workMode = md.value; savePrefs(); render(); };
     const sh = $("#mShow", view); if (sh) sh.onchange = () => { prefs.showMode = sh.value; savePrefs(); render(); };
+    const bindSel = (id, key) => { const el = $(id, view); if (el) el.onchange = () => { prefs[key] = el.type === "checkbox" ? el.checked : el.value; savePrefs(); render(); }; };
+    bindSel("#mSort", "sortBy"); bindSel("#mCountry", "fCountry"); bindSel("#mSource", "fSource"); bindSel("#mVisa", "visaOnly"); bindSel("#mHide", "hideTracked");
+    const mq = $("#mQ", view);
+    if (mq) { let t; mq.oninput = () => { clearTimeout(t); t = setTimeout(() => { prefs.q = mq.value; savePrefs(); render(); const el = $("#mQ"); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }, 350); }; }
+    const rs = $("#mReset", view); if (rs) rs.onclick = () => { Object.assign(prefs, { showMode: "any", minScore: 0, fCountry: "", fSource: "", visaOnly: false, hideTracked: false, q: "" }); savePrefs(); render(); };
     const per = $("#mPer", view); if (per) per.onchange = () => { prefs.perCountry = Number(per.value); savePrefs(); render(); };
     const min = $("#mMin", view); if (min) min.onchange = () => { prefs.minScore = Number(min.value); savePrefs(); render(); };
     const find = $("#findBtn", view); if (find) find.onclick = run(findJobs);

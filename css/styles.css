@@ -380,3 +380,10 @@ textarea.letter { font-size: 14px; line-height: 1.55; }
 .table tr.row-sel { background: var(--primary-soft); }
 .bulk-bar { display: flex; align-items: center; gap: 8px; padding: 4px 4px 4px 12px; border-radius: 8px; background: var(--primary-soft); font-size: 13px; font-weight: 600; }
 .bulk-bar[hidden] { display: none; }
+
+/* Matches filter bar */
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px 12px; align-items: flex-end; padding: 12px 18px 14px; border-bottom: 1px solid var(--border); }
+.filter-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 500; color: var(--muted); }
+.filter-bar label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 13px; padding-bottom: 8px; }
+.filter-bar .select { width: auto; min-width: 120px; }
+.filter-bar .grow { flex: 1; min-width: 180px; }
