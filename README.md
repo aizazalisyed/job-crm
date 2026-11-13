@@ -1,6 +1,6 @@
-# JobTrack CRM
+# My Job Tracker
 
-A personal CRM for tracking job applications across target countries. It's a static site built with plain HTML, CSS and JavaScript, so there's no build step and it can be hosted on GitHub Pages.
+A personal tracker for job applications across target countries. It's a static site built with plain HTML, CSS and JavaScript, so there's no build step and it can be hosted on GitHub Pages.
 
 ## Features
 - **Dashboard:** KPIs (applications, active, interviews, offers, response rate), pipeline by stage, applications by country, weekly trend, upcoming follow-ups and top matches by fit score
