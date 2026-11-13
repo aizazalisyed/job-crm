@@ -32,33 +32,9 @@
 
   // ---------- data ----------
   async function load() {
-    state.jobs = await Store.list("jobs");
-    state.contacts = await Store.list("contacts");
-    state.settings = await Store.getSettings();
-    if (Store === LocalStore) {
-      if (!localStorage.getItem("jobtrack:seeded") && state.jobs.length === 0) {
-        await seed();
-        localStorage.setItem("jobtrack:seeded", "1");
-      }
-      return;
-    }
-    // Firebase: offer to move data saved in this browser up to the cloud, once.
-    const migratedKey = `jobtrack:migrated:${Store.user.uid}`;
-    const localJobs = await LocalStore.list("jobs");
-    let flagged = false;
-    try { flagged = !!localStorage.getItem(migratedKey); } catch {}
-    if (!flagged && state.jobs.length === 0 && localJobs.length > 0) {
-      if (confirm(`Found ${localJobs.length} job(s) saved in this browser. Upload them to your cloud account?\n\n(If they are only the sample jobs, press Cancel.)`)) {
-        await Store.replaceAll("jobs", localJobs);
-        await Store.replaceAll("contacts", await LocalStore.list("contacts"));
-        await Store.saveSettings(await LocalStore.getSettings());
-        state.jobs = await Store.list("jobs");
-        state.contacts = await Store.list("contacts");
-        state.settings = await Store.getSettings();
-        toast("Browser data uploaded to the cloud");
-      }
-    }
-    try { localStorage.setItem(migratedKey, "1"); } catch {}
+    const [jobs, contacts, settings] = await Promise.all([Store.list("jobs"), Store.list("contacts"), Store.getSettings()]);
+    state.jobs = jobs; state.contacts = contacts; state.settings = settings;
+    document.documentElement.dataset.theme = settings.theme === "dark" ? "dark" : "light";
   }
 
   function matchesSearch(j) {
@@ -295,8 +271,6 @@
   // ---------- settings ----------
   function renderSettings() {
     $("#countryChips").innerHTML = state.settings.countries.map(c => `<span class="chip">${esc(c)}<button data-remove-country="${esc(c)}" aria-label="Remove ${esc(c)}">×</button></span>`).join("") || `<span class="hint">No countries yet</span>`;
-    $("#backendMode").textContent = Store.mode;
-    $("#storagePill").textContent = Store.mode === "Firebase" ? "Synced with Firebase" : "Saved in this browser";
   }
 
   // ---------- modals ----------
@@ -357,30 +331,6 @@
     clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2200);
   }
 
-  // ---------- sample data ----------
-  async function seed() {
-    const d = (n) => { const x = new Date(); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
-    const contacts = [
-      { name: "Kadri Tamm", role: "Talent Acquisition", company: "Nordic Fintech OÜ", email: "", linkedin: "", notes: "Replied fast on LinkedIn" },
-      { name: "Marco Vella", role: "Head of IT Audit", company: "Island Bank plc", email: "", linkedin: "", notes: "" },
-      { name: "Elena Georgiou", role: "Recruiter", company: "Big Four Cyprus", email: "", linkedin: "", notes: "" }
-    ];
-    for (const c of contacts) await Store.save("contacts", c);
-    const jobs = [
-      { title: "IT Auditor", company: "Nordic Fintech OÜ", country: "Estonia", city: "Tallinn", status: "Interview", priority: "High", workMode: "Hybrid", source: "LinkedIn", fitScore: 9, salary: "€48k to €58k", appliedDate: d(-12), followUpDate: d(1), visa: true, language: "English only", contact: "Kadri Tamm", link: "", notes: "Second round with the audit manager" },
-      { title: "Senior IT Risk Consultant", company: "Island Bank plc", country: "Malta", city: "Valletta", status: "Screening", priority: "High", workMode: "On-site", source: "Referral", fitScore: 8, salary: "", appliedDate: d(-6), followUpDate: d(-1), visa: true, language: "English", contact: "Marco Vella", link: "", notes: "DORA readiness focus" },
-      { title: "Cybersecurity Audit Associate", company: "Big Four Cyprus", country: "Cyprus", city: "Nicosia", status: "Applied", priority: "Medium", workMode: "Hybrid", source: "LinkedIn", fitScore: 7, salary: "", appliedDate: d(-3), followUpDate: d(5), visa: false, language: "English, Greek a plus", contact: "Elena Georgiou", link: "", notes: "" },
-      { title: "ICT Risk Specialist (DORA)", company: "Baltic Payments UAB", country: "Lithuania", city: "Vilnius", status: "Applied", priority: "High", workMode: "Hybrid", source: "Company site", fitScore: 8, salary: "", appliedDate: d(-9), followUpDate: d(0), visa: true, language: "English", contact: "", link: "", notes: "" },
-      { title: "Information Security Auditor", company: "Fund Services S.A.", country: "Luxembourg", city: "Luxembourg", status: "Saved", priority: "Medium", workMode: "On-site", source: "LinkedIn", fitScore: 7, salary: "", appliedDate: "", followUpDate: "", visa: false, language: "English, French a plus", contact: "", link: "", notes: "Apply this week" },
-      { title: "GRC Analyst", company: "Riga Tech SIA", country: "Latvia", city: "Riga", status: "Rejected", priority: "Low", workMode: "Remote", source: "Job board", fitScore: 5, salary: "", appliedDate: d(-25), followUpDate: "", visa: false, language: "", contact: "", link: "", notes: "Wanted Latvian speaker" },
-      { title: "IT Audit Senior", company: "Tallinn Bank AS", country: "Estonia", city: "Tallinn", status: "Applied", priority: "Medium", workMode: "Hybrid", source: "LinkedIn", fitScore: 7, salary: "", appliedDate: d(-18), followUpDate: d(-4), visa: false, language: "English", contact: "", link: "", notes: "" },
-      { title: "Technology Risk Manager", company: "Gaming Group Ltd", country: "Malta", city: "Sliema", status: "Offer", priority: "High", workMode: "Hybrid", source: "Recruiter", fitScore: 8, salary: "€60k", appliedDate: d(-30), followUpDate: d(3), visa: true, language: "English", contact: "", link: "", notes: "Offer deadline coming up" }
-    ];
-    for (const j of jobs) await Store.save("jobs", j);
-    state.jobs = await Store.list("jobs");
-    state.contacts = await Store.list("contacts");
-  }
-
   // ---------- events ----------
   function bind() {
     window.addEventListener("hashchange", route);
@@ -388,7 +338,8 @@
     $("#themeBtn").onclick = () => {
       const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
       document.documentElement.dataset.theme = t;
-      try { localStorage.setItem("jobtrack:theme", t); } catch {}
+      state.settings.theme = t;
+      if (Store.user) Store.saveSettings(state.settings);
     };
     $("#addJobBtn").onclick = () => openJob(null);
     $("#addContactBtn").onclick = () => openContact(null);
@@ -455,25 +406,6 @@
       }
       $("#countryInput").value = ""; render();
     });
-    $("#exportJsonBtn").onclick = () => download(`jobtrack-backup-${todayStr()}.json`, JSON.stringify({ jobs: state.jobs, contacts: state.contacts, settings: state.settings }, null, 2), "application/json");
-    $("#importJson").addEventListener("change", async e => {
-      const file = e.target.files[0]; if (!file) return;
-      try {
-        const data = JSON.parse(await file.text());
-        if (!Array.isArray(data.jobs)) throw new Error("Missing jobs");
-        await Store.replaceAll("jobs", data.jobs);
-        await Store.replaceAll("contacts", data.contacts || []);
-        if (data.settings) await Store.saveSettings(data.settings);
-        await load(); toast("Backup imported"); render();
-      } catch (err) { toast("That file is not a valid backup"); }
-      e.target.value = "";
-    });
-    $("#seedBtn").onclick = async () => { await seed(); toast("Sample data added"); render(); };
-    $("#clearBtn").onclick = async () => {
-      if (!confirm("Delete all jobs and contacts? Export a backup first if you need one.")) return;
-      await Store.replaceAll("jobs", []); await Store.replaceAll("contacts", []);
-      state.jobs = []; state.contacts = []; toast("All data deleted"); render();
-    };
     bindKanbanDnD();
   }
 
@@ -489,6 +421,7 @@
   async function start() {
     showGate("Loading your data…", false);
     await load();
+    if (window.JobMatch) await window.JobMatch.syncKeys();
     $("#authGate").classList.add("hidden");
     if (Store.user) {
       $("#userBox").hidden = false;
@@ -509,7 +442,6 @@
   }
 
   (async function init() {
-    try { const t = localStorage.getItem("jobtrack:theme"); if (t) document.documentElement.dataset.theme = t; } catch {}
     bind();
     window.addEventListener("unhandledrejection", e => { console.error(e.reason); toast(friendlyError(e.reason)); });
 
@@ -519,12 +451,12 @@
     };
     $("#signOutBtn").onclick = async () => {
       await Store.signOut();
+      if (window.JobMatch) window.JobMatch.clearLocalKeys();
       state.jobs = []; state.contacts = [];
       $("#userBox").hidden = true;
       showGate("You're signed out.", true);
     };
 
-    if (Store === LocalStore) { $("#authGate").classList.add("hidden"); await load(); route(); return; }
     try {
       showGate("Connecting…", false);
       const user = await Store.init();

@@ -11,8 +11,13 @@ A personal CRM for tracking job applications across target countries. It's a sta
 - **Settings:** target countries, JSON backup and import, sample data, and a light/dark theme
 
 ## Data storage
-- **Local mode** (default): data lives in this browser's localStorage.
-- **Firebase mode**: you sign in with Google, and data is stored in Cloud Firestore under `users/{uid}/...`, so it syncs across all your devices. On first sign-in, the app offers to upload any jobs saved in the browser.
+Everything is stored in Cloud Firestore under your Google account, and nothing is saved in the browser:
+- `users/{uid}/jobs`, `users/{uid}/contacts`
+- `users/{uid}/meta/settings` (countries, CV profile, theme, search preferences)
+- `users/{uid}/meta/matchResults` (last AI Job Match results)
+- `users/{uid}/private/keys` (Claude API key and Apify token)
+
+Firestore runs with an in-memory cache only. Access is restricted to the signed-in owner by `firestore.rules`.
 
 ## Firebase setup
 1. Create a project at console.firebase.google.com.

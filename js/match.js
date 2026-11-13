@@ -6,31 +6,28 @@
  * 4. Add good matches to the tracker in one click.
  * Without an Apify token, the page still builds ready-made LinkedIn search links (free).
  *
- * API keys live only in this browser's localStorage. The profile is saved through Store
- * (so it syncs through Firebase); search results are cached in localStorage.
+ * Nothing is stored in the browser. API keys, the CV profile, search preferences and the
+ * last results are all saved in Firebase and loaded after sign-in (see syncKeys below).
  */
 window.JobMatch = (() => {
   const $ = (s, el = document) => el.querySelector(s);
   const { esc, toast, state } = window.JT;
 
-  const K = { anthropic: "jobtrack:anthropicKey", apify: "jobtrack:apifyToken", model: "jobtrack:model", results: "jobtrack:lastResults", prefs: "jobtrack:matchPrefs" };
-  const ls = {
-    get: k => { try { return localStorage.getItem(k) || ""; } catch { return ""; } },
-    set: (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} }
-  };
+  const EMPTY_KEYS = { anthropicKey: "", apifyToken: "", model: "" };
   const DEFAULT_MODEL = "claude-sonnet-5-5";
   const ACTOR = "valig~linkedin-jobs-scraper";
   const DATE_OPTS = { r86400: "Past 24 hours", r604800: "Past week", r2592000: "Past month" };
 
+  // Everything below lives in memory only and is loaded from Firebase after sign-in.
+  let keys = { ...EMPTY_KEYS };
   let results = [];
-  try { results = JSON.parse(ls.get(K.results) || "[]"); } catch {}
-  let prefs = { countries: null, datePosted: "r604800", perCountry: 25, minScore: 0 };
-  try { prefs = { ...prefs, ...JSON.parse(ls.get(K.prefs) || "{}") }; } catch {}
+  const DEFAULT_PREFS = { countries: null, datePosted: "r604800", perCountry: 25, minScore: 0 };
+  let prefs = { ...DEFAULT_PREFS };
   let busy = false;
   let status = "";
 
-  const savePrefs = () => ls.set(K.prefs, JSON.stringify(prefs));
-  const saveResults = () => ls.set(K.results, JSON.stringify(results));
+  const savePrefs = () => { state.settings.matchPrefs = { ...prefs }; Store.saveSettings(state.settings).catch(e => toast(e.message)); };
+  const saveResults = () => Store.saveMeta("matchResults", { items: results, savedAt: new Date().toISOString() }).catch(e => toast("Couldn't save results: " + e.message));
   const profile = () => state.settings.profile || null;
   const targetCountries = () => state.settings.countries || [];
   const selectedCountries = () => (prefs.countries || targetCountries()).filter(c => targetCountries().includes(c));
@@ -38,7 +35,7 @@ window.JobMatch = (() => {
 
   // ---------- Claude API ----------
   async function claude(body) {
-    const key = ls.get(K.anthropic);
+    const key = keys.anthropicKey;
     if (!key) throw new Error("Add your Claude API key in Settings first.");
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
@@ -48,7 +45,7 @@ window.JobMatch = (() => {
         "anthropic-version": "2023-06-01",
         "anthropic-dangerous-direct-browser-access": "true"
       },
-      body: JSON.stringify({ model: ls.get(K.model) || DEFAULT_MODEL, ...body })
+      body: JSON.stringify({ model: keys.model || DEFAULT_MODEL, ...body })
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error("Claude API error: " + ((data.error && data.error.message) || res.status));
@@ -163,7 +160,7 @@ window.JobMatch = (() => {
   }
 
   async function searchCountry(country, keywords) {
-    const token = ls.get(K.apify);
+    const token = keys.apifyToken;
     const url = `https://api.apify.com/v2/acts/${ACTOR}/run-sync-get-dataset-items?token=${encodeURIComponent(token)}&timeout=240&clean=true&format=json`;
     const res = await fetch(url, {
       method: "POST",
@@ -220,8 +217,8 @@ window.JobMatch = (() => {
   async function findJobs() {
     const p = profile();
     if (!p) return toast("Upload your CV first");
-    if (!ls.get(K.apify)) return toast("Add your Apify token in Settings, or use the LinkedIn links");
-    if (!ls.get(K.anthropic)) return toast("Add your Claude API key in Settings first");
+    if (!keys.apifyToken) return toast("Add your Apify token in Settings, or use the LinkedIn links");
+    if (!keys.anthropicKey) return toast("Add your Claude API key in Settings first");
     const countries = selectedCountries();
     if (!countries.length) return toast("Select at least one country");
     if (!p.searchKeywords || !p.searchKeywords.length) return toast("Add at least one search keyword");
@@ -275,7 +272,7 @@ window.JobMatch = (() => {
   function render() {
     const view = $("#view-match"); if (!view) return;
     const p = profile();
-    const hasA = !!ls.get(K.anthropic), hasP = !!ls.get(K.apify);
+    const hasA = !!keys.anthropicKey, hasP = !!keys.apifyToken;
     const sel = selectedCountries();
     const shown = results.filter(r => (r.score || 0) >= Number(prefs.minScore || 0));
 
@@ -403,24 +400,42 @@ window.JobMatch = (() => {
   }
 
   // ---------- settings: keys ----------
+  let fillForm = () => {};
   function initKeysForm() {
     const f = $("#keysForm"); if (!f) return;
-    const fill = () => {
-      f.anthropicKey.value = ls.get(K.anthropic);
-      f.apifyToken.value = ls.get(K.apify);
-      f.model.value = ls.get(K.model) || DEFAULT_MODEL;
+    fillForm = () => {
+      f.anthropicKey.value = keys.anthropicKey || "";
+      f.apifyToken.value = keys.apifyToken || "";
+      f.model.value = keys.model || DEFAULT_MODEL;
     };
-    fill();
-    f.onsubmit = e => {
+    fillForm();
+    f.onsubmit = async e => {
       e.preventDefault();
-      ls.set(K.anthropic, f.anthropicKey.value.trim());
-      ls.set(K.apify, f.apifyToken.value.trim());
-      ls.set(K.model, f.model.value);
-      toast("Keys saved on this device");
+      const next = { anthropicKey: f.anthropicKey.value.trim(), apifyToken: f.apifyToken.value.trim(), model: f.model.value };
+      try { await Store.saveKeys(next); keys = next; toast("Keys saved to your account"); }
+      catch (err) { console.error(err); toast("Couldn't save keys to Firebase: " + err.message); }
     };
-    $("#clearKeysBtn").onclick = () => { [K.anthropic, K.apify, K.model].forEach(k => ls.set(k, "")); fill(); toast("Keys removed from this device"); };
+    $("#clearKeysBtn").onclick = async () => {
+      try { await Store.saveKeys({ ...EMPTY_KEYS }); keys = { ...EMPTY_KEYS }; fillForm(); toast("Keys removed"); }
+      catch (err) { console.error(err); toast("Couldn't remove keys: " + err.message); }
+    };
   }
+
+  // Called after sign-in: load keys, preferences and the last results from Firebase.
+  async function syncKeys() {
+    if (!Store.user) return;
+    prefs = { ...DEFAULT_PREFS, ...(state.settings.matchPrefs || {}) };
+    try {
+      const [k, saved] = await Promise.all([Store.getKeys(), Store.getMeta("matchResults")]);
+      keys = { ...EMPTY_KEYS, ...k };
+      results = (saved && Array.isArray(saved.items)) ? saved.items : [];
+    } catch (err) { console.error("Loading AI Job Match data failed", err); toast("Couldn't load your keys: " + err.message); }
+    fillForm();
+  }
+  // On sign-out, drop everything held in memory.
+  function clearLocalKeys() { keys = { ...EMPTY_KEYS }; results = []; prefs = { ...DEFAULT_PREFS }; fillForm(); }
+
   initKeysForm();
 
-  return { render };
+  return { render, syncKeys, clearLocalKeys };
 })();

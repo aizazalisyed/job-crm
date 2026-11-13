@@ -36,7 +36,7 @@
             <button class="link-btn" id="signOutBtn">Sign out</button>
           </div>
         </div>
-        <div class="storage-pill" id="storagePill">Saved in this browser</div>
+        <div class="storage-pill" id="storagePill">Synced with Firebase</div>
       </div>
     </aside>
 
@@ -151,19 +151,13 @@
               </form>
             </div>
             <div class="card">
-              <div class="card-head"><h3>Data</h3></div>
-              <p class="muted">Data is stored in this browser for now. Back it up as JSON, or move it to another device.</p>
-              <div class="btn-row">
-                <button class="btn" id="exportJsonBtn">Export JSON backup</button>
-                <label class="btn">Import JSON<input type="file" id="importJson" accept="application/json" hidden /></label>
-                <button class="btn" id="seedBtn">Load sample data</button>
-                <button class="btn danger" id="clearBtn">Delete all data</button>
-              </div>
+              <div class="card-head"><h3>Backend</h3></div>
+              <p class="muted">All your jobs, contacts, settings, CV profile and keys are stored in Cloud Firestore under your Google account. Nothing is saved in the browser, so everything is fetched fresh from Firebase each time you sign in. Only you can read your data.</p>
             </div>
           </div>
           <div class="card">
             <div class="card-head"><h3>AI and job search keys</h3></div>
-            <p class="muted">Used by AI Job Match. Keys are saved only in this browser on this device. They are never uploaded to GitHub or Firebase.</p>
+            <p class="muted">Used by AI Job Match. Keys are saved privately in your Firebase account, so they work on every device you sign in on. Only you can read them. They are never saved in the browser or uploaded to GitHub.</p>
             <form class="form-grid" id="keysForm">
               <label>Claude API key (from console.anthropic.com)<input class="input" type="password" name="anthropicKey" placeholder="sk-ant-…" autocomplete="off" /></label>
               <label>Apify API token (from console.apify.com)<input class="input" type="password" name="apifyToken" placeholder="apify_api_…" autocomplete="off" /></label>
@@ -176,10 +170,6 @@
               </label>
               <div class="btn-row" style="align-items:flex-end"><button class="btn primary">Save keys</button><button type="button" class="btn danger ghost" id="clearKeysBtn">Remove keys</button></div>
             </form>
-          </div>
-          <div class="card">
-            <div class="card-head"><h3>Backend</h3></div>
-            <p class="muted">Storage mode: <strong id="backendMode">Local (browser)</strong>. In Firebase mode your data is stored in Cloud Firestore under your Google account and syncs across all your devices. Only you can read it.</p>
           </div>
         </section>
       </main>

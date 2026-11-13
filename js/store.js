@@ -1,13 +1,15 @@
 /*
  * Data layer.
- * The UI only talks to `Store`. Two adapters share the same methods:
- *   LocalAdapter    : browser localStorage (used when Firebase is disabled)
- *   FirebaseAdapter : Firestore + Google sign-in (used when FIREBASE_CONFIG.enabled is true)
+ * The UI only talks to `Store`, which is backed by Firebase (Firestore + Google sign-in).
+ * Nothing is stored in the browser: Firestore runs with an in-memory cache only, and all
+ * data is fetched from Firebase after sign-in.
  *
  * Firestore layout (each user only sees their own data, enforced by firestore.rules):
  *   users/{uid}/jobs/{jobId}
  *   users/{uid}/contacts/{contactId}
- *   users/{uid}/meta/settings
+ *   users/{uid}/meta/settings       (countries, CV profile, theme, search preferences)
+ *   users/{uid}/meta/matchResults   (last AI Job Match results)
+ *   users/{uid}/private/keys        (Claude API key, Apify token)
  *
  * Data shapes
  * Job:     { id, title, company, country, city, status, priority, workMode, source,
@@ -28,38 +30,6 @@ const STAGES = [
 ];
 
 const DEFAULT_SETTINGS = { countries: ["Estonia", "Lithuania", "Latvia", "Malta", "Cyprus", "Luxembourg"] };
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-
-class LocalAdapter {
-  constructor(prefix = "jobtrack") { this.prefix = prefix; this.mode = "Local (browser)"; this.user = null; }
-  async init() { return null; }
-  _get(key, fallback) {
-    try { const v = localStorage.getItem(`${this.prefix}:${key}`); return v ? JSON.parse(v) : fallback; }
-    catch { return fallback; }
-  }
-  _set(key, value) {
-    try { localStorage.setItem(`${this.prefix}:${key}`, JSON.stringify(value)); } catch (e) { console.warn("Storage failed", e); }
-  }
-  async list(collection) { return this._get(collection, []); }
-  async save(collection, item) {
-    const items = this._get(collection, []);
-    const now = new Date().toISOString();
-    if (item.id) {
-      const i = items.findIndex(x => x.id === item.id);
-      if (i >= 0) items[i] = item = { ...items[i], ...item, updatedAt: now };
-      else items.push(item = { ...item, createdAt: now, updatedAt: now });
-    } else {
-      item = { ...item, id: uid(), createdAt: now, updatedAt: now };
-      items.push(item);
-    }
-    this._set(collection, items);
-    return item;
-  }
-  async remove(collection, id) { this._set(collection, this._get(collection, []).filter(x => x.id !== id)); }
-  async replaceAll(collection, items) { this._set(collection, items); }
-  async getSettings() { return this._get("settings", structuredClone(DEFAULT_SETTINGS)); }
-  async saveSettings(s) { this._set("settings", s); }
-}
 
 class FirebaseAdapter {
   constructor(config) {
@@ -80,16 +50,8 @@ class FirebaseAdapter {
     this.A = A; this.F = F;
     this.app = appMod.initializeApp(this.config);
     this.auth = A.getAuth(this.app);
-    try {
-      // Offline cache: the app keeps working on a bad connection and syncs later.
-      this.db = F.initializeFirestore(this.app, {
-        ignoreUndefinedProperties: true,
-        localCache: F.persistentLocalCache({ tabManager: F.persistentMultipleTabManager() })
-      });
-    } catch (e) {
-      console.warn("Offline cache unavailable, using memory cache", e);
-      this.db = F.initializeFirestore(this.app, { ignoreUndefinedProperties: true });
-    }
+    // Memory cache only: no copy of your data is written to the browser's storage.
+    this.db = F.initializeFirestore(this.app, { ignoreUndefinedProperties: true });
     // Wait for Firebase to restore any existing session.
     this.user = await new Promise(resolve => {
       const stop = A.onAuthStateChanged(this.auth, u => { stop(); resolve(u); });
@@ -148,9 +110,22 @@ class FirebaseAdapter {
     return snap.exists() ? { ...structuredClone(DEFAULT_SETTINGS), ...snap.data() } : structuredClone(DEFAULT_SETTINGS);
   }
   async saveSettings(s) { await this.F.setDoc(this._settingsRef(), s); }
+
+  // API keys live in their own private doc (users/{uid}/private/keys), separate from
+  // settings so they never end up in JSON exports. Protected by firestore.rules.
+  _keysRef() { return this.F.doc(this.db, "users", this.user.uid, "private", "keys"); }
+  async getKeys() {
+    const snap = await this.F.getDoc(this._keysRef());
+    return snap.exists() ? snap.data() : { anthropicKey: "", apifyToken: "", model: "" };
+  }
+  async saveKeys(keys) { await this.F.setDoc(this._keysRef(), { ...keys, updatedAt: new Date().toISOString() }); }
+
+  // Generic single documents under users/{uid}/meta/{name}
+  async getMeta(name) {
+    const snap = await this.F.getDoc(this.F.doc(this.db, "users", this.user.uid, "meta", name));
+    return snap.exists() ? snap.data() : null;
+  }
+  async saveMeta(name, data) { await this.F.setDoc(this.F.doc(this.db, "users", this.user.uid, "meta", name), data); }
 }
 
-const LocalStore = new LocalAdapter();
-const Store = window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.enabled
-  ? new FirebaseAdapter(window.FIREBASE_CONFIG)
-  : LocalStore;
+const Store = new FirebaseAdapter(window.FIREBASE_CONFIG || {});
