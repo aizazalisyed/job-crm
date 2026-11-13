@@ -14,7 +14,7 @@
     jobs: ["All jobs", "Filter, sort and export your applications"],
     followups: ["Follow-ups", "Who you need to chase and when"],
     contacts: ["Contacts", "People connected to your applications"],
-    settings: ["Settings", "Countries, backups and backend"]
+    settings: ["Settings", "Countries, API keys and backend"]
   };
 
   // ---------- dates ----------
