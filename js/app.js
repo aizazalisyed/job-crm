@@ -8,6 +8,7 @@
   const state = { jobs: [], contacts: [], settings: { countries: [] }, search: "", sort: { key: "updatedAt", dir: -1 }, selected: new Set() };
 
   const VIEWS = {
+    agent: ["Jarvis", "Your personal AI assistant"],
     dashboard: ["Dashboard", "Your job search at a glance"],
     match: ["AI Job Match", "Upload your CV and let Claude find relevant LinkedIn jobs"],
     pipeline: ["Pipeline", "Every application by stage"],
@@ -58,6 +59,7 @@
     $("#viewTitle").textContent = VIEWS[v][0];
     $("#viewSubtitle").textContent = VIEWS[v][1];
     $("#sidebar").classList.remove("open");
+    document.body.classList.toggle("view-agent-active", v === "agent");
     render();
   }
 
@@ -72,6 +74,7 @@
     if (v === "contacts") renderContacts();
     if (v === "settings") renderSettings();
     if (v === "match" && window.JobMatch) window.JobMatch.render();
+    if (v === "agent" && window.Jarvis) window.Jarvis.render();
   }
 
   function renderLists() {
@@ -511,6 +514,7 @@
     $("#signOutBtn").onclick = async () => {
       await Store.signOut();
       if (window.JobMatch) window.JobMatch.clearLocalKeys();
+      if (window.Jarvis) window.Jarvis.reset();
       state.jobs = []; state.contacts = [];
       $("#userBox").hidden = true;
       showGate("You're signed out.", true);
@@ -520,7 +524,7 @@
       showGate("Connecting…", false);
       const user = await Store.init();
       if (user) await start();
-      else showGate("Sign in to see your job tracker.", true);
+      else showGate("Sign in to continue.", true);
     } catch (err) {
       console.error(err);
       showGate("Couldn't connect to Firebase: " + friendlyError(err), false);
